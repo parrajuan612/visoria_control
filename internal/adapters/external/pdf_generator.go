@@ -30,10 +30,10 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 
 	pdf := gofpdf.New("P", "mm", "A4", "")
 
-	// --- MARCA DE AGUA ---
+	tr := pdf.UnicodeTranslatorFromDescriptor("cp1252")
+
 	pdf.SetHeaderFunc(func() {
 		pdf.SetAlpha(0.1, "Normal")
-		// Si la imagen no existe, esto no fallará, solo no se mostrará
 		pdf.ImageOptions("Isologo_6@2x (1).png", 30, 75, 150, 0, false, gofpdf.ImageOptions{ReadDpi: true}, 0, "")
 		pdf.SetAlpha(1.0, "Normal")
 	})
@@ -41,90 +41,88 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 	pdf.AddPage()
 	pdf.SetAutoPageBreak(false, 0)
 
-	// Logo principal
 	pdf.ImageOptions("logo.png", 10, 10, 70, 0, false, gofpdf.ImageOptions{ImageType: "PNG", ReadDpi: true}, 0, "")
 
-	// --- ENCABEZADO ---
 	pdf.SetY(32)
 	pdf.SetFont("Arial", "", 10)
 	fechaActual := time.Now().Format("02/01/2006")
-	pdf.Cell(0, 4, fmt.Sprintf("BOGOTA - %s", fechaActual)) // Quitamos tilde a Bogotá por seguridad
+	// El "R" alinea el texto a la derecha de la celda que ocupa todo el ancho (0)
+	pdf.CellFormat(0, 4, tr(fmt.Sprintf("BOGOTÁ - %s", fechaActual)), "", 1, "R", false, 0, "")
 	pdf.Ln(5)
 
 	pdf.SetFont("Arial", "B", 10)
-	pdf.MultiCell(0, 4, tournament.Name, "", "L", false)
+	pdf.MultiCell(0, 4, tr(player.VisoriaLocation), "", "L", false)
 	pdf.Ln(4)
 
-	// --- DATOS DEL JUGADOR ---
 	colWidth := 40.0
 	rowHeight := 4.0
 
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(colWidth, rowHeight, "Acudiente:", "", 0, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
-	pdf.CellFormat(0, rowHeight, player.GuardianName, "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, rowHeight, tr(player.GuardianName), "", 1, "L", false, 0, "")
 
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(colWidth, rowHeight, "Jugador:", "", 0, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
-	pdf.CellFormat(0, rowHeight, player.Name, "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, rowHeight, tr(player.Name), "", 1, "L", false, 0, "")
 
 	pdf.SetFont("Arial", "B", 10)
-	pdf.CellFormat(colWidth, rowHeight, "Año Nacimiento:", "", 0, "L", false, 0, "")
+	pdf.CellFormat(colWidth, rowHeight, tr("Año Nacimiento:"), "", 0, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
 	pdf.CellFormat(0, rowHeight, fmt.Sprintf("%d", player.BirthYear), "", 1, "L", false, 0, "")
 
 	pdf.SetFont("Arial", "B", 10)
-	pdf.CellFormat(colWidth, rowHeight, "Movil:", "", 0, "L", false, 0, "") // Sin tilde
+	pdf.CellFormat(colWidth, rowHeight, tr("Móvil:"), "", 0, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
 	pdf.CellFormat(0, rowHeight, "(+57) "+player.PrimaryPhone, "", 1, "L", false, 0, "")
 	pdf.Ln(4)
 
-	// --- REFERENCIA Y TÍTULO ---
 	pdf.SetFont("Arial", "BU", 10)
-	pdf.CellFormat(0, rowHeight, "Ref. Propuesta Jugadores seleccionados", "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, rowHeight, "Ref. Propuesta Jugadores seleccionados", "", 1, "C", false, 0, "")
 	pdf.Ln(2)
 
 	pdf.SetFont("Arial", "B", 10)
-	pdf.CellFormat(0, rowHeight, "PROGRAMA DE INTERCAMBIO DEPORTIVO", "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, rowHeight, "PROGRAMA DE INTERCAMBIO DEPORTIVO", "", 1, "C", false, 0, "")
 	pdf.Ln(2)
 
-	// --- CUERPO DEL TEXTO ---
 	pdf.SetFont("Arial", "", 10)
-	pdf.MultiCell(0, 4, "Consiste en la participacion del ALUMNO - DEPORTISTA en el intercambio deportivo, torneo de futbol en ESPANA.", "", "J", false)
+	pdf.MultiCell(0, 4, tr("Consiste en la participación del ALUMNO - DEPORTISTA en el intercambio deportivo, torneo de fútbol en ESPAÑA."), "", "J", false)
 	pdf.SetFont("Arial", "U", 10)
-	pdf.CellFormat(0, 4, "solamente participara de un torneo", "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 4, tr("solamente participará de un torneo"), "", 1, "L", false, 0, "")
 	pdf.SetFont("Arial", "B", 10)
-	pdf.CellFormat(0, 4, fmt.Sprintf("- %s", tournament.Name), "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 4, tr(fmt.Sprintf("- %s", tournament.Name)), "", 1, "L", false, 0, "")
 	pdf.Ln(2)
 
-	// CATEGORIAS
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(0, 4, "CATEGORIAS:", "", 1, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
-	pdf.CellFormat(0, 4, tournament.Category, "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 4, tr(tournament.Category), "", 1, "L", false, 0, "")
 	pdf.Ln(2)
 
-	// FECHAS
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(0, 4, "Fechas para el viaje:", "", 1, "L", false, 0, "")
 
-	// Usamos CellFormat en lugar de Write para evitar el error de parsing de gofpdf
-	pdf.CellFormat(0, 4, "SALIDA el 18/03/2027", "", 1, "L", false, 0, "")
-	pdf.CellFormat(0, 4, "LLEGADA a Espana al aeropuerto de BARCELONA el 19/03/2027", "", 1, "L", false, 0, "")
+	pdf.Write(4, "SALIDA el 18/03/2027\n")
+
+	pdf.Write(4, tr("LLEGADA a España al aeropuerto de BARCELONA el 19/03/2027"))
 	pdf.SetFont("Arial", "", 10)
-	pdf.CellFormat(0, 4, ", ingresaran con cena y se recogeran en el aeropuerto.", "", 1, "L", false, 0, "")
+	pdf.Write(4, tr(", ingresarán con cena y se recogerán en el aeropuerto en el transcurso del día máximo hasta las 5:00 pm hora España.\n"))
 
 	pdf.SetFont("Arial", "B", 10)
-	pdf.CellFormat(0, 4, "REGRESO el 28/03/2027", "", 1, "L", false, 0, "")
-
-	pdf.CellFormat(0, 4, "INCLUYE:", "", 1, "L", false, 0, "")
+	pdf.Write(4, "REGRESO el 28/03/2027 ")
 	pdf.SetFont("Arial", "", 10)
-	pdf.MultiCell(0, 4, "Alimentacion - hospedaje - transporte interno en Espana (aeropuerto-torneo-turismo-entrenos-hoteles) - Indumentaria - Inscripcion Torneo - Visitas turisticas...", "", "J", false)
+	pdf.Write(4, tr("salen con Desayuno y almuerzo, los buses llegarán 3:00 pm para ir de nuevo al aeropuerto, se sugiere que los vuelos sean después de las 8:00 pm.\n"))
 
+	pdf.SetFont("Arial", "B", 10)
+	pdf.Write(4, "INCLUYE: ")
+	pdf.SetFont("Arial", "", 10)
+	pdf.Write(4, tr("Alimentación - hospedaje - transporte interno en España (aeropuerto-torneo-turismo-entrenos-hoteles) - Indumentaria - Inscripción Torneo - Visitas turísticas, Visorías por parte de los clubes y las academias que tenemos convenios para que el jugador continúe con su primer proceso en Europa según su desempeño, este puede ser de 30-60-90 días.\n"))
+
+	pdf.Ln(2)
+	pdf.MultiCell(0, 4, tr("En el mes de enero/2027 se realizará la pre-temporada en Bogotá. (fechas por confirmar)"), "", "L", false)
 	pdf.Ln(3)
 
-	// --- TABLA DE COSTOS Y BECA ---
 	becaNum, _ := strconv.Atoi(strings.ReplaceAll(player.Scholarship, "%", ""))
 
 	pdf.SetFont("Arial", "B", 11)
@@ -133,16 +131,17 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(80, 5, "BECA", "1", 0, "C", false, 0, "")
-	pdf.CellFormat(80, 5, "VALOR EUROS", "1", 1, "C", false, 0, "") // Quitamos el símbolo del euro por ahora para evitar problemas de encoding
+	// 👉 INCLUIMOS EL SÍMBOLO € EN EL ENCABEZADO DE LA TABLA
+	pdf.CellFormat(80, 5, tr("VALOR € EUROS"), "1", 1, "C", false, 0, "")
 
 	pdf.SetFont("Arial", "", 10)
 	filas := [][]string{
-		{"Sin Beca", "2.800"},
-		{"Beca al 30%", "1.960"},
-		{"Beca al 50%", "1.550"},
-		{"Beca al 70%", "990"},
-		{"Beca al 100%", "200 administracion"},
-		{"Acompanante", "1.800"},
+		{"Sin Beca", "€ 2.800"},
+		{"Beca al 30%", "€ 1.960"},
+		{"Beca al 50%", "€ 1.550"},
+		{"Beca al 70%", "€ 990"},
+		{"Beca al 100%", "€ 200 administración"},
+		{"Acompañante", "€ 1.800"},
 	}
 
 	for i, fila := range filas {
@@ -166,37 +165,100 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 			fill = true
 		}
 
-		pdf.CellFormat(80, 5, fila[0], "1", 0, "L", fill, 0, "")
-		pdf.CellFormat(80, 5, fila[1], "1", 1, "C", fill, 0, "")
+		pdf.CellFormat(80, 5, tr(fila[0]), "1", 0, "L", fill, 0, "")
+		pdf.CellFormat(80, 5, tr(fila[1]), "1", 1, "C", fill, 0, "")
 	}
 	pdf.Ln(2)
 
-	pdf.MultiCell(0, 4, "NO INCLUYE: Tiquetes Aereos, Emision del pasaporte, Seguro de viaje.\nLos pagos se deben realizar a la cuenta de ahorros # 22546881826 de BANCOLOMBIA...", "", "J", false)
+	pdf.SetFont("Arial", "BU", 10) // B = Bold (Negrita), U = Underline (Subrayado)
+	pdf.Write(4, "NO INCLUYE: ")
+	pdf.SetFont("Arial", "", 10) // Volvemos a la fuente normal
+	// Usamos Write de nuevo para que continúe justo al lado y haga el salto de línea automático
+	pdf.Write(4, tr("Tiquetes Aéreos, Emisión del pasaporte, Seguro de viaje.\nLos pagos se deben realizar a la cuenta de ahorros # 22546881826 de BANCOLOMBIA o en DAVIVIENDA cuenta de ahorros # 0570008380462534 las dos a nombre de Suysan Colmenares Camargo C.C 79739776. SEGÚN LOS VALORES VENTA DE DIVISAS CAMBIOS VANCOUVER (página web cambiosvancouver.com)\n"))
 	pdf.Ln(3)
 
-	// --- TABLA RESPONSIVE DE PAGOS ---
 	pdf.SetFont("Arial", "B", 10)
-	pdf.CellFormat(0, 4, "Programacion Pagos:", "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 4, tr("Programación Pagos:"), "", 1, "L", false, 0, "")
 
-	// Leemos los pagos desde Google Sheets
-	p1 := tournament.Pricing.Pago1
-	// Limpiamos los símbolos raros o euros si los trajera para evitar crasheos
-	p1 = strings.ReplaceAll(p1, "€", "")
+	p1 := strings.ReplaceAll(tournament.Pricing.Pago1, "€", "")
+	p2 := strings.ReplaceAll(tournament.Pricing.Pago2, "€", "")
+	p3 := strings.ReplaceAll(tournament.Pricing.Pago3, "€", "")
 
-	pdf.CellFormat(0, 5, fmt.Sprintf("1er pago: %s", p1), "", 1, "L", false, 0, "")
+	numPagos := 0
+	if strings.TrimSpace(p1) != "" {
+		numPagos++
+	}
+	if strings.TrimSpace(p2) != "" {
+		numPagos++
+	}
+	if strings.TrimSpace(p3) != "" {
+		numPagos++
+	}
 
-	pdf.Ln(4)
+	if numPagos > 0 {
+		anchoTotal := 180.0
+		anchoColumna := anchoTotal / float64(numPagos+1)
+
+		pdf.SetFont("Arial", "B", 10)
+		pdf.CellFormat(anchoColumna, 5, "PROGRAMA", "1", 0, "C", false, 0, "")
+
+		// 👉 INCLUIMOS EL SÍMBOLO € AL FINAL DEL MONTO EN LOS PAGOS
+		if strings.TrimSpace(p1) != "" {
+			pdf.CellFormat(anchoColumna, 5, tr(fmt.Sprintf("1er pago %s€", strings.TrimSpace(p1))), "1", 0, "C", false, 0, "")
+		}
+		if strings.TrimSpace(p2) != "" {
+			pdf.CellFormat(anchoColumna, 5, tr(fmt.Sprintf("2do pago %s€", strings.TrimSpace(p2))), "1", 0, "C", false, 0, "")
+		}
+		if strings.TrimSpace(p3) != "" {
+			pdf.CellFormat(anchoColumna, 5, tr(fmt.Sprintf("3er pago %s€", strings.TrimSpace(p3))), "1", 0, "C", false, 0, "")
+		}
+		pdf.Ln(5)
+
+		pdf.SetFont("Arial", "", 10)
+		pdf.CellFormat(anchoColumna, 5, tr("TORNEO ESPAÑA"), "1", 0, "C", false, 0, "")
+
+		if strings.TrimSpace(p1) != "" {
+			pdf.CellFormat(anchoColumna, 5, "30/09/2026", "1", 0, "C", false, 0, "")
+		}
+		if strings.TrimSpace(p2) != "" {
+			pdf.CellFormat(anchoColumna, 5, "30/10/2026", "1", 0, "C", false, 0, "")
+		}
+		if strings.TrimSpace(p3) != "" {
+			pdf.CellFormat(anchoColumna, 5, "15/12/2026", "1", 0, "C", false, 0, "")
+		}
+		pdf.Ln(6)
+	}
+
+	pdf.Ln(3)
+	pdf.SetFont("Arial", "B", 9)
+	pdf.Write(4, "NOTA - CONDICIONES DEL PROGRAMA: ")
+	pdf.SetFont("Arial", "", 9)
+	pdf.Write(4, tr("Los valores abonados no serán objeto de devolución en caso de que el deportista finalmente no realice el viaje. No obstante, dichos valores podrán ser reintegrados en servicios correspondientes al programa y permanecerán congelados por un periodo máximo de un (1) año, de acuerdo con las condiciones establecidas por el programa. Asimismo, en caso de que el deportista o su responsable económico no cumpla con las fechas de pago previamente acordadas, el programa no estará obligado a garantizar ni prestar la totalidad de los servicios anteriormente descritos, quedando su prestación sujeta a la disponibilidad y a las condiciones vigentes del programa.\n"))
+
+	// Reducimos un poco el espacio antes de "Cordialmente" para ganar aire
+	pdf.Ln(2)
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(0, 4, "Cordialmente:", "", 1, "L", false, 0, "")
 
 	xFirma := pdf.GetX()
 	yFirma := pdf.GetY()
-	// Si tienes firma.png, la pone, si no, sigue sin romper
-	pdf.ImageOptions("firma.png", xFirma, yFirma-3, 40, 0, false, gofpdf.ImageOptions{ReadDpi: true}, 0, "")
+	// Subimos ligeramente la imagen de la firma (yFirma - 4)
+	pdf.ImageOptions("firma.png", xFirma, yFirma-4, 35, 0, false, gofpdf.ImageOptions{ReadDpi: true}, 0, "")
 
-	pdf.SetY(yFirma + 24)
+	// Ajustamos el salto para que el nombre y cargo queden justo debajo de la firma sin desbordarse
+	pdf.SetY(yFirma + 20)
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(0, 4, "SUYSAN COLMENARES C.", "", 1, "L", false, 0, "")
+	pdf.SetFont("Arial", "", 10)
+	pdf.CellFormat(0, 4, "Coordinador Programa", "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 4, tr("Móvil (+57) 3202411029"), "", 1, "L", false, 0, "")
+
+	// Redes sociales y contacto como pie de página (sin cambios)
+	pdf.SetY(-22)
+	pdf.SetFont("Times", "", 11)
+	pdf.CellFormat(0, 4, "Instagram @majestic_intercambio", "", 1, "C", false, 0, "")
+	pdf.CellFormat(0, 4, "Facebook Majestic Intercambio", "", 1, "C", false, 0, "")
+	pdf.CellFormat(0, 4, tr("Móvil +57 3202411029"), "", 1, "C", false, 0, "")
 
 	err = pdf.OutputFileAndClose(fileName)
 	if err != nil {

@@ -7,11 +7,10 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Clases para transiciones suaves */
         .step-hidden { display: none !important; }
         .step-active { display: block !important; animation: fadeIn 0.5s ease-in-out; }
+        .step-flex { display: flex !important; animation: fadeIn 0.5s ease-in-out; } /* Nueva clase */
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        /* Spinner CSS */
         .loader { border: 4px solid #f3f3f3; border-top: 4px solid #1e3a8a; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -19,7 +18,7 @@
 <body class="bg-gray-100 min-h-screen font-sans text-gray-800">
 
     <!-- SPLASH SCREEN -->
-    <div id="splash" class="fixed inset-0 bg-blue-900 z-50 flex flex-col items-center justify-center step-active">
+    <div id="splash" class="fixed inset-0 bg-blue-900 z-50 flex flex-col items-center justify-center step-flex">
         <div class="w-32 h-32 bg-white rounded-full flex items-center justify-center mb-6 shadow-lg">
             <span class="text-blue-900 font-bold text-xl">MAJESTIC</span>
         </div>
@@ -112,7 +111,7 @@
                         <button onclick="goToStep(2)" class="text-gray-500 hover:text-gray-800 font-semibold py-3 px-4 transition cursor-pointer">
                             &larr; Volver
                         </button>
-                        <button id="btnStartProcess" onclick="startMassiveProcess()" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg transform hover:scale-105 transition duration-200 flex items-center cursor-pointer">
+                        <button type="button" id="btnStartProcess" onclick="startMassiveProcess()" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg transform hover:scale-105 transition duration-200 flex items-center cursor-pointer">
                             INICIAR ENVÍO MASIVO
                         </button>
                     </div>

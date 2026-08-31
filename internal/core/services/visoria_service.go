@@ -6,7 +6,7 @@ import (
 	"mime/multipart"
 	"strconv"
 	"strings"
-	"time" // ¡Añadir este!
+	"time"
 
 	"visoria-control/internal/core/domain"
 	"visoria-control/internal/core/ports"
@@ -32,17 +32,14 @@ func (s *visoriaService) LoadMasterConfig(ctx context.Context, csvURL string) er
 	return s.repo.LoadConfigFromCSV(ctx, csvURL)
 }
 
-// Estos los llenaremos en el próximo sprint
 func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart.File) ([]domain.Player, error) {
 
-	// Abrimos el archivo excel usando la librería
 	f, err := excelize.OpenReader(file)
 	if err != nil {
 		return nil, fmt.Errorf("error al abrir el archivo Excel: %w", err)
 	}
 	defer f.Close()
 
-	// Asumimos que los datos están en la primera hoja ("Sheet1" o "Hoja1")
 	sheetName := f.GetSheetList()[0]
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -51,16 +48,14 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 
 	var players []domain.Player
 
-	// Iteramos sobre las filas del Excel del cliente
 	for i, row := range rows {
 		if i == 0 {
-			continue // Saltar cabeceras
+			continue
 		}
 		if len(row) < 4 {
-			continue // Al menos necesitamos hasta la fecha de nacimiento
+			continue
 		}
 
-		// Helper para no salirnos de los límites del arreglo
 		getCol := func(idx int) string {
 			if idx < len(row) {
 				return strings.TrimSpace(row[idx])
@@ -68,27 +63,23 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 			return ""
 		}
 
-		// 1. Extraer Beca
 		becaRaw := getCol(2)
 		beca := becaRaw
 		if becaRaw != "" && becaRaw != "ACOMPAÑANTE" && becaRaw != "SIN BECA" && !strings.Contains(becaRaw, "%") {
 			beca = becaRaw + "%"
 		}
 
-		// 2. Extraer Año de Nacimiento (USANDO TU LÓGICA ROBUSTA)
 		fechaNac := getCol(3)
 		var anio int
 		parsedDate := parseBirthDate(fechaNac)
 		if !parsedDate.IsZero() {
 			anio = parsedDate.Year()
 		} else {
-			// Intento salvavidas por si solo escribieron el año directo "2013"
 			if len(fechaNac) >= 4 {
 				anio, _ = strconv.Atoi(fechaNac[:4])
 			}
 		}
 
-		// AQUÍ SUCEDE EL CRUCE DE DATOS CON EL GOOGLE SHEETS
 		torneoInfo, _ := s.repo.GetTournamentForPlayer(ctx, anio, beca)
 
 		player := domain.Player{
@@ -101,7 +92,6 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 			Tournament:   torneoInfo,
 		}
 
-		// VALIDACIONES DE NEGOCIO IMPORTANTES
 		if player.Name == "" || player.PrimaryPhone == "" || anio == 0 {
 			player.Status = "INVALID_DATA"
 		} else if player.Tournament.Name == "" || player.Tournament.Pricing.Total == "No definido" {
@@ -113,6 +103,7 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 
 	return players, nil
 }
+
 func parseBirthDate(value string) time.Time {
 	formats := []string{
 		"01-02-06",
@@ -120,7 +111,7 @@ func parseBirthDate(value string) time.Time {
 		"02/01/2006",
 		"02-01-2006",
 		"2006-01-02",
-		"01/02/06", // Añadido por si acaso
+		"01/02/06",
 	}
 
 	for _, format := range formats {
@@ -130,11 +121,12 @@ func parseBirthDate(value string) time.Time {
 	}
 	return time.Time{}
 }
+
 func (s *visoriaService) GenerateDocuments(ctx context.Context, players []domain.Player) ([]string, error) {
 	var generatedPaths []string
 
 	for _, p := range players {
-		if p.Status != "PENDING" { // Solo generar para los válidos
+		if p.Status != "PENDING" {
 			continue
 		}
 
@@ -149,51 +141,61 @@ func (s *visoriaService) GenerateDocuments(ctx context.Context, players []domain
 	return generatedPaths, nil
 }
 
-func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players []domain.Player) error {
+func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players []domain.Player, progressChan chan<- string) error {
 	for i, p := range players {
 		if p.Status != "PENDING" {
 			continue
 		}
 
-		// 1. Limpieza y formato del número de teléfono
 		phone := strings.ReplaceAll(p.PrimaryPhone, " ", "")
 		phone = strings.ReplaceAll(phone, "+", "")
-		// Si el número tiene 10 dígitos (típico celular colombiano), le agregamos el código de país 57
 		if len(phone) == 10 {
 			phone = "57" + phone
 		}
 
-		fmt.Printf("[%d/%d] Enviando WhatsApp a %s (%s)...\n", i+1, len(players), p.Name, phone)
+		msgInicio := fmt.Sprintf("[%d/%d] Enviando WhatsApp a %s...", i+1, len(players), p.Name)
+		fmt.Println(msgInicio)
+		progressChan <- msgInicio
 
-		// 2. Configuración de Componentes de la Plantilla
-		// IMPORTANTE: Si tu plantilla en Meta NO tiene variables (como {{1}}),
-		// puedes dejar components vacío: components := []interface{}{}
+		becaNum := strings.ReplaceAll(p.Scholarship, "%", "")
 
-		// Ejemplo ASUMIENDO que tu plantilla tiene 1 variable para el nombre del acudiente:
-		// Hola {{1}}, te escribimos para...
 		components := []interface{}{
+			map[string]interface{}{
+				"type": "header",
+				"parameters": []interface{}{
+					map[string]interface{}{
+						"type": "document",
+						"document": map[string]string{
+							// Le quitamos el "Beca_" al link para que busque el PDF nuevo
+							"link": fmt.Sprintf("https://porthole-cross-cassette.ngrok-free.dev/pdfs/%s.pdf", strings.ReplaceAll(p.Name, " ", "_")),
+							// El filename sí puede llevar el "Beca_" porque es solo el nombre visual con el que le llega al cliente
+							"filename": fmt.Sprintf("Beca_%s.pdf", strings.ReplaceAll(p.Name, " ", "_")),
+						},
+					},
+				},
+			},
 			map[string]interface{}{
 				"type": "body",
 				"parameters": []interface{}{
-					map[string]string{
-						"type": "text",
-						"text": p.GuardianName, // O p.Name si la plantilla saluda al jugador
-					},
+					map[string]string{"type": "text", "text": p.GuardianName},
+					map[string]string{"type": "text", "text": becaNum},
+					map[string]string{"type": "text", "text": p.Name},
 				},
 			},
 		}
 
-		// 3. Envío usando el nombre exacto de la plantilla y el idioma
-		// Asegúrate de que el nombre de la plantilla sea exactamente como está en Meta
-		err := s.waAPI.SendTemplate(ctx, phone, "envio_certificado_beca", "es_CO", components)
+		err := s.waAPI.SendTemplate(context.Background(), phone, "purchase_receipt_3", "es_CO", components)
 
 		if err != nil {
-			fmt.Printf("❌ Error enviando a %s: %v\n", p.Name, err)
+			msgErr := fmt.Sprintf("❌ Error enviando a %s: %v", p.Name, err)
+			fmt.Println(msgErr)
+			progressChan <- msgErr
 		} else {
-			fmt.Printf("✅ Mensaje enviado a %s\n", p.Name)
+			msgOk := fmt.Sprintf("✅ Mensaje enviado a %s", p.Name)
+			fmt.Println(msgOk)
+			progressChan <- msgOk
 		}
 
-		// Pausa de seguridad (Meta rate limits)
 		time.Sleep(3 * time.Second)
 	}
 

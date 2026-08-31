@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -18,7 +21,6 @@ func NewVisoriaHandler(s ports.VisoriaService) *VisoriaHandler {
 	return &VisoriaHandler{service: s}
 }
 
-// Endpoint POST /api/v1/config/load
 func (h *VisoriaHandler) LoadConfig(c *gin.Context) {
 	var req struct {
 		CsvURL string `json:"csv_url" binding:"required"`
@@ -45,7 +47,6 @@ func (h *VisoriaHandler) UploadPlayersExcel(c *gin.Context) {
 	}
 	defer file.Close()
 
-	// Cambiamos la validación para aceptar .xlsx
 	if !strings.HasSuffix(header.Filename, ".xlsx") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Por favor sube un archivo con formato .xlsx"})
 		return
@@ -64,7 +65,6 @@ func (h *VisoriaHandler) UploadPlayersExcel(c *gin.Context) {
 }
 
 func (h *VisoriaHandler) GeneratePDFs(c *gin.Context) {
-	// Recibimos la lista de jugadores desde el frontend
 	var req struct {
 		Players []domain.Player `json:"players"`
 	}
@@ -74,7 +74,6 @@ func (h *VisoriaHandler) GeneratePDFs(c *gin.Context) {
 		return
 	}
 
-	// Llamamos al servicio para generar los PDFs
 	paths, err := h.service.GenerateDocuments(c.Request.Context(), req.Players)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error generando PDFs: " + err.Error()})
@@ -88,7 +87,6 @@ func (h *VisoriaHandler) GeneratePDFs(c *gin.Context) {
 }
 
 func (h *VisoriaHandler) SendWhatsApp(c *gin.Context) {
-	// Recibimos la lista de jugadores desde el frontend
 	var req struct {
 		Players []domain.Player `json:"players"`
 	}
@@ -98,14 +96,29 @@ func (h *VisoriaHandler) SendWhatsApp(c *gin.Context) {
 		return
 	}
 
-	// Disparamos la lógica de WhatsApp (que tiene los time.Sleep para no ser baneados)
-	err := h.service.DispatchWhatsAppMessages(c.Request.Context(), req.Players)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error enviando mensajes: " + err.Error()})
-		return
-	}
+	// Configurar cabeceras mágicas para Streaming (SSE)
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Campaña de WhatsApp finalizada",
+	progressChan := make(chan string)
+
+	// Ejecutamos el envío en segundo plano
+	go func() {
+		defer close(progressChan)
+		err := h.service.DispatchWhatsAppMessages(context.Background(), req.Players, progressChan)
+		if err != nil {
+			progressChan <- fmt.Sprintf("❌ Error fatal: %v", err)
+		}
+		progressChan <- "FIN"
+	}()
+
+	// Escuchamos el canal y le inyectamos los textos al navegador en vivo
+	c.Stream(func(w io.Writer) bool {
+		if msg, ok := <-progressChan; ok {
+			c.SSEvent("message", msg)
+			return true
+		}
+		return false
 	})
 }

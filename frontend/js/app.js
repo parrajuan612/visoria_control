@@ -1,7 +1,7 @@
 // Simulador de carga inicial (Splash Screen)
 window.addEventListener('load', () => {
     setTimeout(() => {
-        document.getElementById('splash').classList.remove('step-active');
+        document.getElementById('splash').classList.remove('step-flex'); // AQUÍ ESTÁ EL FIX
         document.getElementById('splash').classList.add('step-hidden');
         
         document.getElementById('step1').classList.remove('step-hidden');
@@ -20,7 +20,7 @@ async function goToStep(step) {
 
         try {
             // URL Pública de tu CSV de Google Sheets (Reemplaza si es diferente)
-            const sheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTZRPVVDLaG_DrZbuk6FdMdgeATdckx8-juQNgpcdjG5yDpZ0XaVX5MjTMpNi7B5I1R2IUCV3WCdv-B/pub?output=csv";
+            const sheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTZRPVVDLaG_DrZbuk6FdMdgeATdckx8-juQNgpcdjG5yDpZ0XaVX5MjTMpNi7B5I1R2IUCV3WCdv-B/pub?gid=1182981075&single=true&output=csv";
             
             const response = await fetch(`${API_URL}/config/load`, {
                 method: 'POST',
@@ -48,25 +48,9 @@ async function goToStep(step) {
     
     document.getElementById('step' + step).classList.replace('step-hidden', 'step-active');
 }
+
 // Variable global para guardar los niños mientras avanzamos por los pasos
 window.currentPlayers = [];
-
-// Paso 2: Subir Excel
-document.getElementById('excelUpload').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    try {
-        const data = await uploadPlayersExcel(file);
-        
-        // Guardamos los jugadores procesados
-        window.currentPlayers = data.data;
-        
-        renderValidationTable(window.currentPlayers);
-    } catch (error) {
-        alert("Error: " + error.message);
-    }
-});
 
 // Escuchar cuando el usuario arrastra/selecciona el Excel
 document.getElementById('excelUpload').addEventListener('change', async (e) => {
@@ -78,7 +62,10 @@ document.getElementById('excelUpload').addEventListener('change', async (e) => {
         // Llamamos a la función de api.js
         const data = await uploadPlayersExcel(file);
         
-        renderValidationTable(data.data);
+        // Guardamos los jugadores procesados
+        window.currentPlayers = data.data;
+        
+        renderValidationTable(window.currentPlayers);
     } catch (error) {
         alert("Error: " + error.message);
     }
@@ -94,7 +81,7 @@ function renderValidationTable(players) {
                         <tr><th class="p-2">Jugador</th><th class="p-2">Torneo Asignado</th><th class="p-2">Estado</th></tr>
                     </thead><tbody>`;
 
-players.forEach(p => {
+    players.forEach(p => {
         const isError = p.Status !== 'PENDING';
         const torneoNombre = p.Tournament && p.Tournament.Name ? p.Tournament.Name : '<span class="text-red-500 font-bold">Sin Torneo</span>';
         
@@ -113,13 +100,18 @@ players.forEach(p => {
     tableContainer.innerHTML = html;
 }
 
+// En js/app.js
 async function startMassiveProcess() {
-    if (!window.currentPlayers || window.currentPlayers.length === 0) {
+if (!window.currentPlayers || window.currentPlayers.length === 0) {
         alert("No hay jugadores válidos para procesar.");
         return;
     }
 
-    const consoleDiv = document.getElementById('logConsole'); // Necesitamos este ID en el HTML
+    // 👉 NUEVAS LÍNEAS: Capturar el valor del input y agregarlo a cada jugador
+    const lugarVisoria = document.getElementById('visoria').value || "Sede Majestic Intercambio";
+    window.currentPlayers.forEach(p => p.VisoriaLocation = lugarVisoria);
+
+    const consoleDiv = document.getElementById('logConsole');
     const btn = document.getElementById('btnStartProcess');
     
     btn.disabled = true;
@@ -127,22 +119,36 @@ async function startMassiveProcess() {
     btn.classList.add('opacity-50', 'cursor-not-allowed');
 
     const log = (msg) => {
-        if(consoleDiv) consoleDiv.innerHTML += `<p>> ${msg}</p>`;
+        if(consoleDiv) {
+            consoleDiv.innerHTML += `<p>> ${msg}</p>`;
+            consoleDiv.scrollTop = consoleDiv.scrollHeight; 
+        }
         console.log(msg);
     };
 
-    try {
-        // 1. Generar PDFs
+try {
+        // 👉 AQUÍ CAPTURAMOS Y FORZAMOS EL CAMBIO EN EL OBJETO ANTES DE MANDARLO
+        const lugarVisoria = document.getElementById('visoria').value || "Sede Majestic Intercambio";
+        
+        // Creamos una copia fresca de los jugadores inyectando el lugar de visoria
+        const payloadPlayers = window.currentPlayers.map(p => ({
+            ...p,
+            VisoriaLocation: lugarVisoria
+        }));
+
         log("Iniciando generación de PDFs en el servidor...");
-        const pdfRes = await generatePDFs(window.currentPlayers);
+        // Mandamos el payload corregido
+        const pdfRes = await generatePDFs(payloadPlayers);
         log(`Éxito: Se generaron ${pdfRes.generated_count} PDFs correctamente.`);
 
-        // 2. Enviar WhatsApps
         log("-----------------------------------------");
         log("Iniciando envío de campaña por Meta API...");
-        log("NOTA: Esto tomará tiempo para evitar baneos (aprox 3 seg por mensaje).");
+        log("NOTA: Esto tomará tiempo (aprox 3 seg por mensaje).");
         
-        await sendWhatsAppMessages(window.currentPlayers);
+        // Mandamos el payload corregido
+        await sendWhatsAppMessages(payloadPlayers, (msg) => {
+            log(msg); 
+        });
         
         log("-----------------------------------------");
         log("✅ ¡PROCESO MASIVO COMPLETADO CON ÉXITO!");
