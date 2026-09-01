@@ -71,23 +71,29 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 
 		fechaNac := getCol(3)
 		var anio int
+		var fechaNacFormatted string // 👉 NUEVA VARIABLE
+
 		parsedDate := parseBirthDate(fechaNac)
 		if !parsedDate.IsZero() {
 			anio = parsedDate.Year()
+			fechaNacFormatted = parsedDate.Format("02/01/2006") // 👉 FORMATO DÍA/MES/AÑO
 		} else {
 			if len(fechaNac) >= 4 {
 				anio, _ = strconv.Atoi(fechaNac[:4])
 			}
+			fechaNacFormatted = fechaNac // 👉 FALLBACK AL TEXTO ORIGINAL
 		}
 
 		torneoInfo, _ := s.repo.GetTournamentForPlayer(ctx, anio, beca)
 
 		player := domain.Player{
 			Name:         getCol(0),
+			Club:         getCol(1),
 			GuardianName: getCol(4),
 			PrimaryPhone: getCol(5),
 			Scholarship:  beca,
 			BirthYear:    anio,
+			BirthDate:    fechaNacFormatted, // 👉 ASIGNAMOS LA FECHA COMPLETA
 			Status:       "PENDING",
 			Tournament:   torneoInfo,
 		}
@@ -159,6 +165,10 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 
 		becaNum := strings.ReplaceAll(p.Scholarship, "%", "")
 
+		// 👉 EL TRUCO ROMPE-CACHÉ: Usamos la hora actual para que la URL siempre sea distinta
+		timestamp := time.Now().Unix()
+		pdfURL := fmt.Sprintf("https://porthole-cross-cassette.ngrok-free.dev/pdfs/%s.pdf?v=%d", strings.ReplaceAll(p.Name, " ", "_"), timestamp)
+
 		components := []interface{}{
 			map[string]interface{}{
 				"type": "header",
@@ -166,9 +176,7 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 					map[string]interface{}{
 						"type": "document",
 						"document": map[string]string{
-							// Le quitamos el "Beca_" al link para que busque el PDF nuevo
-							"link": fmt.Sprintf("https://porthole-cross-cassette.ngrok-free.dev/pdfs/%s.pdf", strings.ReplaceAll(p.Name, " ", "_")),
-							// El filename sí puede llevar el "Beca_" porque es solo el nombre visual con el que le llega al cliente
+							"link":     pdfURL, // Meta verá una URL nueva y descargará el archivo fresco
 							"filename": fmt.Sprintf("Beca_%s.pdf", strings.ReplaceAll(p.Name, " ", "_")),
 						},
 					},
@@ -196,7 +204,8 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 			progressChan <- msgOk
 		}
 
-		time.Sleep(3 * time.Second)
+		// 👉 AUMENTAMOS LA PAUSA A 6 SEGUNDOS PARA EVITAR QUE META NOS BLOQUEE POR SPAM
+		time.Sleep(6 * time.Second)
 	}
 
 	return nil

@@ -68,9 +68,16 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 	pdf.CellFormat(0, rowHeight, tr(player.Name), "", 1, "L", false, 0, "")
 
 	pdf.SetFont("Arial", "B", 10)
-	pdf.CellFormat(colWidth, rowHeight, tr("Año Nacimiento:"), "", 0, "L", false, 0, "")
+	pdf.CellFormat(colWidth, rowHeight, "Club:", "", 0, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
-	pdf.CellFormat(0, rowHeight, fmt.Sprintf("%d", player.BirthYear), "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, rowHeight, tr(player.Club), "", 1, "L", false, 0, "")
+
+	pdf.SetFont("Arial", "B", 10)
+	// Cambiamos la palabra "Año" por "Fecha"
+	pdf.CellFormat(colWidth, rowHeight, tr("Fecha Nacimiento:"), "", 0, "L", false, 0, "")
+	pdf.SetFont("Arial", "", 10)
+	// Imprimimos el nuevo string directamente
+	pdf.CellFormat(0, rowHeight, player.BirthDate, "", 1, "L", false, 0, "")
 
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(colWidth, rowHeight, tr("Móvil:"), "", 0, "L", false, 0, "")
@@ -112,7 +119,7 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 	pdf.SetFont("Arial", "B", 10)
 	pdf.Write(4, "REGRESO el 28/03/2027 ")
 	pdf.SetFont("Arial", "", 10)
-	pdf.Write(4, tr("salen con Desayuno y almuerzo, los buses llegarán 3:00 pm para ir de nuevo al aeropuerto, se sugiere que los vuelos sean después de las 8:00 pm.\n"))
+	pdf.Write(4, tr("salen con Desayuno y almuerzo, los buses los recogeran de nuevo para ir al aeropuerto, se sugiere que los vuelos sean después de las 8:00 pm.\n"))
 
 	pdf.SetFont("Arial", "B", 10)
 	pdf.Write(4, "INCLUYE: ")
@@ -180,9 +187,9 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(0, 4, tr("Programación Pagos:"), "", 1, "L", false, 0, "")
 
-	p1 := strings.ReplaceAll(tournament.Pricing.Pago1, "€", "")
-	p2 := strings.ReplaceAll(tournament.Pricing.Pago2, "€", "")
-	p3 := strings.ReplaceAll(tournament.Pricing.Pago3, "€", "")
+	p1 := strings.ReplaceAll(strings.ReplaceAll(tournament.Pricing.Pago1, "€", ""), ",00", "")
+	p2 := strings.ReplaceAll(strings.ReplaceAll(tournament.Pricing.Pago2, "€", ""), ",00", "")
+	p3 := strings.ReplaceAll(strings.ReplaceAll(tournament.Pricing.Pago3, "€", ""), ",00", "")
 
 	numPagos := 0
 	if strings.TrimSpace(p1) != "" {
@@ -218,43 +225,54 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 		pdf.CellFormat(anchoColumna, 5, tr("TORNEO ESPAÑA"), "1", 0, "C", false, 0, "")
 
 		if strings.TrimSpace(p1) != "" {
-			pdf.CellFormat(anchoColumna, 5, "30/09/2026", "1", 0, "C", false, 0, "")
+			fecha1 := "30/09/2026" // Valor por defecto si olvidan llenarlo
+			if player.PaymentDate1 != "" {
+				fecha1 = player.PaymentDate1
+			}
+			pdf.CellFormat(anchoColumna, 5, fecha1, "1", 0, "C", false, 0, "")
 		}
 		if strings.TrimSpace(p2) != "" {
-			pdf.CellFormat(anchoColumna, 5, "30/10/2026", "1", 0, "C", false, 0, "")
+			fecha2 := "30/10/2026"
+			if player.PaymentDate2 != "" {
+				fecha2 = player.PaymentDate2
+			}
+			pdf.CellFormat(anchoColumna, 5, fecha2, "1", 0, "C", false, 0, "")
 		}
 		if strings.TrimSpace(p3) != "" {
-			pdf.CellFormat(anchoColumna, 5, "15/12/2026", "1", 0, "C", false, 0, "")
+			fecha3 := "15/12/2026"
+			if player.PaymentDate3 != "" {
+				fecha3 = player.PaymentDate3
+			}
+			pdf.CellFormat(anchoColumna, 5, fecha3, "1", 0, "C", false, 0, "")
 		}
 		pdf.Ln(6)
 	}
 
-	pdf.Ln(3)
+	pdf.Ln(1)
 	pdf.SetFont("Arial", "B", 9)
 	pdf.Write(4, "NOTA - CONDICIONES DEL PROGRAMA: ")
 	pdf.SetFont("Arial", "", 9)
 	pdf.Write(4, tr("Los valores abonados no serán objeto de devolución en caso de que el deportista finalmente no realice el viaje. No obstante, dichos valores podrán ser reintegrados en servicios correspondientes al programa y permanecerán congelados por un periodo máximo de un (1) año, de acuerdo con las condiciones establecidas por el programa. Asimismo, en caso de que el deportista o su responsable económico no cumpla con las fechas de pago previamente acordadas, el programa no estará obligado a garantizar ni prestar la totalidad de los servicios anteriormente descritos, quedando su prestación sujeta a la disponibilidad y a las condiciones vigentes del programa.\n"))
 
-	// Reducimos un poco el espacio antes de "Cordialmente" para ganar aire
-	pdf.Ln(2)
+	pdf.Ln(1)
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(0, 4, "Cordialmente:", "", 1, "L", false, 0, "")
 
 	xFirma := pdf.GetX()
 	yFirma := pdf.GetY()
-	// Subimos ligeramente la imagen de la firma (yFirma - 4)
 	pdf.ImageOptions("firma.png", xFirma, yFirma-4, 35, 0, false, gofpdf.ImageOptions{ReadDpi: true}, 0, "")
 
-	// Ajustamos el salto para que el nombre y cargo queden justo debajo de la firma sin desbordarse
-	pdf.SetY(yFirma + 20)
+	// Reducimos un poco el espacio interno del bloque de la firma
+	pdf.SetY(yFirma + 12)
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(0, 4, "SUYSAN COLMENARES C.", "", 1, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
 	pdf.CellFormat(0, 4, "Coordinador Programa", "", 1, "L", false, 0, "")
 	pdf.CellFormat(0, 4, tr("Móvil (+57) 3202411029"), "", 1, "L", false, 0, "")
 
-	// Redes sociales y contacto como pie de página (sin cambios)
-	pdf.SetY(-22)
+	// 👉 CORRECCIÓN 2: El truco final. Cambiamos de -22 a -15.
+	// Esto empuja el bloque de Instagram/Facebook 7 milímetros más abajo, hacia el límite real de la página.
+	pdf.SetY(-15)
 	pdf.SetFont("Times", "", 11)
 	pdf.CellFormat(0, 4, "Instagram @majestic_intercambio", "", 1, "C", false, 0, "")
 	pdf.CellFormat(0, 4, "Facebook Majestic Intercambio", "", 1, "C", false, 0, "")

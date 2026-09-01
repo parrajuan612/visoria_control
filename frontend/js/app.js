@@ -127,17 +127,29 @@ if (!window.currentPlayers || window.currentPlayers.length === 0) {
     };
 
 try {
-        // 👉 AQUÍ CAPTURAMOS Y FORZAMOS EL CAMBIO EN EL OBJETO ANTES DE MANDARLO
         const lugarVisoria = document.getElementById('visoria').value || "Sede Majestic Intercambio";
         
-        // Creamos una copia fresca de los jugadores inyectando el lugar de visoria
+        // Función para cambiar YYYY-MM-DD a DD/MM/YYYY
+        const formatPdfDate = (dateStr) => {
+            if (!dateStr) return "";
+            const [year, month, day] = dateStr.split('-');
+            return `${day}/${month}/${year}`;
+        };
+
+        const d1 = formatPdfDate(document.getElementById('date1').value) || "30/09/2026";
+        const d2 = formatPdfDate(document.getElementById('date2').value) || "30/10/2026";
+        const d3 = formatPdfDate(document.getElementById('date3').value) || "15/12/2026";
+        
+        // Inyectamos las variables a todos los jugadores
         const payloadPlayers = window.currentPlayers.map(p => ({
             ...p,
-            VisoriaLocation: lugarVisoria
+            VisoriaLocation: lugarVisoria,
+            PaymentDate1: d1,
+            PaymentDate2: d2,
+            PaymentDate3: d3
         }));
 
         log("Iniciando generación de PDFs en el servidor...");
-        // Mandamos el payload corregido
         const pdfRes = await generatePDFs(payloadPlayers);
         log(`Éxito: Se generaron ${pdfRes.generated_count} PDFs correctamente.`);
 
