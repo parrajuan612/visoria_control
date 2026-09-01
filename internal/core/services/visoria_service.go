@@ -96,6 +96,7 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 			BirthDate:    fechaNacFormatted, // 👉 ASIGNAMOS LA FECHA COMPLETA
 			Status:       "PENDING",
 			Tournament:   torneoInfo,
+			FileID:       fmt.Sprintf("%d", time.Now().UnixNano()), // 👉 Paso 2: ID único irrepetible
 		}
 
 		if player.Name == "" || player.PrimaryPhone == "" || anio == 0 {
@@ -165,9 +166,11 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 
 		becaNum := strings.ReplaceAll(p.Scholarship, "%", "")
 
-		// 👉 EL TRUCO ROMPE-CACHÉ: Usamos la hora actual para que la URL siempre sea distinta
-		timestamp := time.Now().Unix()
-		pdfURL := fmt.Sprintf("https://porthole-cross-cassette.ngrok-free.dev/pdfs/%s.pdf?v=%d", strings.ReplaceAll(p.Name, " ", "_"), timestamp)
+		// Reemplazamos espacios por guiones bajos
+		nombreSeguro := strings.ReplaceAll(p.Name, " ", "_")
+
+		// 👉 LA CORRECCIÓN: Armamos la URL para que coincida exactamente con el nombre físico del archivo
+		pdfURL := fmt.Sprintf("https://porthole-cross-cassette.ngrok-free.dev/pdfs/%s_%s.pdf", nombreSeguro, p.FileID)
 
 		components := []interface{}{
 			map[string]interface{}{
@@ -176,8 +179,8 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 					map[string]interface{}{
 						"type": "document",
 						"document": map[string]string{
-							"link":     pdfURL, // Meta verá una URL nueva y descargará el archivo fresco
-							"filename": fmt.Sprintf("Beca_%s.pdf", strings.ReplaceAll(p.Name, " ", "_")),
+							"link":     pdfURL, // Meta ahora buscará la URL exacta con el ID único
+							"filename": fmt.Sprintf("Beca_%s.pdf", nombreSeguro),
 						},
 					},
 				},

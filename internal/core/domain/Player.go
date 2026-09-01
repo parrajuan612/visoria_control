@@ -14,4 +14,5 @@ type Player struct {
 	PaymentDate1    string         `json:"PaymentDate1"`
 	PaymentDate2    string         `json:"PaymentDate2"`
 	PaymentDate3    string         `json:"PaymentDate3"`
+	FileID          string         `json:"FileID"`
 }

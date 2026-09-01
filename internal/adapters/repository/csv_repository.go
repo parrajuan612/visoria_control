@@ -99,7 +99,6 @@ func (r *csvTournamentRepository) LoadConfigFromCSV(ctx context.Context, csvURL 
 
 	return nil
 }
-
 func (r *csvTournamentRepository) GetTournamentForPlayer(ctx context.Context, birthYear int, scholarship string) (domain.TournamentInfo, error) {
 	var info domain.TournamentInfo
 
@@ -109,19 +108,25 @@ func (r *csvTournamentRepository) GetTournamentForPlayer(ctx context.Context, bi
 		info.Pricing = domain.Pricing{Total: "No definido"}
 	}
 
+	// Recolectar todos los torneos que coincidan
+	var torneosEncontrados []string
 	for _, t := range r.listaTorneos {
 		if estaEnRangoGion(birthYear, t["rango"].(string)) {
-			info.Name = t["nombre"].(string)
-			break
+			torneosEncontrados = append(torneosEncontrados, t["nombre"].(string))
 		}
 	}
+	// Unir los torneos con un salto de línea y un guión para listarlos
+	info.Name = strings.Join(torneosEncontrados, "\n- ")
 
+	// Recolectar todas las categorías que coincidan
+	var categoriasEncontradas []string
 	for _, c := range r.listaCategorias {
 		if estaEnRango(birthYear, c["rango"].(string)) {
-			info.Category = c["nombre"].(string)
-			break
+			categoriasEncontradas = append(categoriasEncontradas, c["nombre"].(string))
 		}
 	}
+	// Unir las categorías con un slash (" / ")
+	info.Category = strings.Join(categoriasEncontradas, " / ")
 
 	return info, nil
 }

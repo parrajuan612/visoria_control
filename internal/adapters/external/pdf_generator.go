@@ -26,7 +26,9 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 		return "", err
 	}
 
-	fileName := fmt.Sprintf("uploads/pdfs/%s.pdf", strings.ReplaceAll(player.Name, " ", "_"))
+	// 👉 Paso 3: Usamos el ID único para nombrar el archivo físico
+	nombreSeguro := strings.ReplaceAll(player.Name, " ", "_")
+	fileName := fmt.Sprintf("uploads/pdfs/%s_%s.pdf", nombreSeguro, player.FileID)
 
 	pdf := gofpdf.New("P", "mm", "A4", "")
 
@@ -74,7 +76,7 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 
 	pdf.SetFont("Arial", "B", 10)
 	// Cambiamos la palabra "Año" por "Fecha"
-	pdf.CellFormat(colWidth, rowHeight, tr("Fecha Nacimiento:"), "", 0, "L", false, 0, "")
+	pdf.CellFormat(colWidth, rowHeight, tr("Fecha de Nacimiento:"), "", 0, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
 	// Imprimimos el nuevo string directamente
 	pdf.CellFormat(0, rowHeight, player.BirthDate, "", 1, "L", false, 0, "")
@@ -97,14 +99,17 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 	pdf.MultiCell(0, 4, tr("Consiste en la participación del ALUMNO - DEPORTISTA en el intercambio deportivo, torneo de fútbol en ESPAÑA."), "", "J", false)
 	pdf.SetFont("Arial", "U", 10)
 	pdf.CellFormat(0, 4, tr("solamente participará de un torneo"), "", 1, "L", false, 0, "")
+
+	// 👉 CAMBIO AQUÍ: Usamos MultiCell para soportar múltiples torneos con saltos de línea
 	pdf.SetFont("Arial", "B", 10)
-	pdf.CellFormat(0, 4, tr(fmt.Sprintf("- %s", tournament.Name)), "", 1, "L", false, 0, "")
+	pdf.MultiCell(0, 4, tr(fmt.Sprintf("- %s", tournament.Name)), "", "L", false)
 	pdf.Ln(2)
 
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(0, 4, "CATEGORIAS:", "", 1, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
-	pdf.CellFormat(0, 4, tr(tournament.Category), "", 1, "L", false, 0, "")
+	// 👉 CAMBIO AQUÍ: Usamos MultiCell por si las categorías ocupan más de una línea
+	pdf.MultiCell(0, 4, tr(tournament.Category), "", "L", false)
 	pdf.Ln(2)
 
 	pdf.SetFont("Arial", "B", 10)
