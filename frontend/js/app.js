@@ -102,34 +102,77 @@ function renderValidationTable(players) {
 
 // En js/app.js
 async function startMassiveProcess() {
-if (!window.currentPlayers || window.currentPlayers.length === 0) {
+    if (!window.currentPlayers || window.currentPlayers.length === 0) {
         alert("No hay jugadores válidos para procesar.");
         return;
     }
 
-    // 👉 NUEVAS LÍNEAS: Capturar el valor del input y agregarlo a cada jugador
-    const lugarVisoria = document.getElementById('visoria').value || "Sede Majestic Intercambio";
-    window.currentPlayers.forEach(p => p.VisoriaLocation = lugarVisoria);
+    const totalPlayers = window.currentPlayers.length;
+    let successCount = 0;
 
+    // Referencias a elementos visuales del nuevo dashboard
     const consoleDiv = document.getElementById('logConsole');
     const btn = document.getElementById('btnStartProcess');
-    
+    const statTotal = document.getElementById('statTotal');
+    const statSuccess = document.getElementById('statSuccess');
+    const statStatus = document.getElementById('statStatus');
+    const progressBar = document.getElementById('progressBar');
+    const progressPercentage = document.getElementById('progressPercentage');
+    const progressLabel = document.getElementById('progressLabel');
+
+    // Inicializar estadísticas visuales
+    statTotal.innerText = totalPlayers;
+    statSuccess.innerText = "0";
+    statStatus.innerText = "Procesando...";
+    consoleDiv.innerHTML = ""; // Limpiar consola
+
     btn.disabled = true;
-    btn.innerText = "Procesando... No cierres esta ventana";
+    btn.innerText = "Procesando Campaña...";
     btn.classList.add('opacity-50', 'cursor-not-allowed');
 
-    const log = (msg) => {
-        if(consoleDiv) {
-            consoleDiv.innerHTML += `<p>> ${msg}</p>`;
-            consoleDiv.scrollTop = consoleDiv.scrollHeight; 
-        }
-        console.log(msg);
+    const updateProgress = (current, total) => {
+        const percent = Math.round((current / total) * 100);
+        progressBar.style.width = `${percent}%`;
+        progressPercentage.innerText = `${percent}%`;
+        progressLabel.innerText = `Procesando ${current} de ${total} registros`;
     };
 
-try {
+    const logItem = (message, type = 'info') => {
+        let bgClass = "bg-gray-50 text-gray-700 border-gray-100";
+        let dotColor = "bg-blue-500";
+        let icon = "ℹ️";
+
+        if (type === 'success') {
+            bgClass = "bg-green-50 text-green-800 border-green-100";
+            dotColor = "bg-green-500";
+            icon = "✅";
+            successCount++;
+            statSuccess.innerText = successCount;
+        } else if (type === 'error') {
+            bgClass = "bg-red-50 text-red-800 border-red-100";
+            dotColor = "bg-red-500";
+            icon = "❌";
+        } else if (type === 'warning') {
+            bgClass = "bg-amber-50 text-amber-800 border-amber-100";
+            dotColor = "bg-amber-500";
+            icon = "⚠️";
+        }
+
+        const itemHTML = `
+            <div class="flex items-center justify-between p-2.5 rounded-lg border ${bgClass} transition-all duration-300">
+                <div class="flex items-center space-x-2 truncate">
+                    <span class="w-2 h-2 ${dotColor} rounded-full flex-shrink-0"></span>
+                    <span class="font-medium truncate">${icon} ${message}</span>
+                </div>
+            </div>
+        `;
+        consoleDiv.innerHTML += itemHTML;
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+    };
+
+    try {
         const lugarVisoria = document.getElementById('visoria').value || "Sede Majestic Intercambio";
         
-        // Función para cambiar YYYY-MM-DD a DD/MM/YYYY
         const formatPdfDate = (dateStr) => {
             if (!dateStr) return "";
             const [year, month, day] = dateStr.split('-');
@@ -140,7 +183,6 @@ try {
         const d2 = formatPdfDate(document.getElementById('date2').value) || "30/10/2026";
         const d3 = formatPdfDate(document.getElementById('date3').value) || "15/12/2026";
         
-        // Inyectamos las variables a todos los jugadores
         const payloadPlayers = window.currentPlayers.map(p => ({
             ...p,
             VisoriaLocation: lugarVisoria,
@@ -149,27 +191,42 @@ try {
             PaymentDate3: d3
         }));
 
-        log("Iniciando generación de PDFs en el servidor...");
-        const pdfRes = await generatePDFs(payloadPlayers);
-        log(`Éxito: Se generaron ${pdfRes.generated_count} PDFs correctamente.`);
-
-        log("-----------------------------------------");
-        log("Iniciando envío de campaña por Meta API...");
-        log("NOTA: Esto tomará tiempo (aprox 3 seg por mensaje).");
+        logItem("Iniciando generación masiva de PDFs en el servidor...", "info");
+        statStatus.innerText = "Generando PDFs...";
         
-        // Mandamos el payload corregido
+        const pdfRes = await generatePDFs(payloadPlayers);
+        logItem(`Se generaron ${pdfRes.generated_count} PDFs correctamente en el servidor.`, "success");
+
+        logItem("Conectando con Meta API y Chatwoot para envío masivo...", "info");
+        statStatus.innerText = "Enviando por WhatsApp...";
+
+        let processedCount = 0;
         await sendWhatsAppMessages(payloadPlayers, (msg) => {
-            log(msg); 
+            processedCount++;
+            updateProgress(processedCount, totalPlayers);
+
+            if (msg.includes("Error") || msg.includes("rechazó")) {
+                logItem(msg, "error");
+            } else {
+                logItem(msg, "success");
+            }
         });
         
-        log("-----------------------------------------");
-        log("✅ ¡PROCESO MASIVO COMPLETADO CON ÉXITO!");
-        alert("¡Todos los certificados y mensajes han sido enviados!");
+        updateProgress(totalPlayers, totalPlayers);
+        statStatus.innerText = "Completado con éxito";
+        logItem("¡Campaña masiva finalizada y registrada correctamente!", "success");
+        
+        alert("¡Todos los certificados y mensajes han sido enviados exitosamente!");
 
     } catch (error) {
-        log(`<span class="text-red-500">❌ Error Crítico: ${error.message}</span>`);
-        alert("Ocurrió un error en el proceso. Revisa la consola.");
+        statStatus.innerText = "Error crítico";
+        logItem(`Error Crítico: ${error.message}`, "error");
+        alert("Ocurrió un error en el proceso. Revisa el panel.");
     } finally {
         btn.innerText = "PROCESO FINALIZADO";
+        btn.classList.remove('bg-green-500', 'hover:bg-green-600');
+        btn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
     }
 }
