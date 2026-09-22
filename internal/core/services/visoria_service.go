@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -301,16 +302,47 @@ func (s *visoriaService) registrarEnChatwoot(phone string, playerName string, me
 		}
 		defer respCreate.Body.Close()
 
-		var createResult struct {
-			Payload struct {
-				ID int `json:"id"`
-			} `json:"payload"`
+		respBodyBytes, errRead := io.ReadAll(respCreate.Body)
+		if errRead != nil {
+			return fmt.Errorf("error leyendo respuesta de Chatwoot: %w", errRead)
 		}
 
-		if err := json.NewDecoder(respCreate.Body).Decode(&createResult); err != nil || createResult.Payload.ID == 0 {
-			return fmt.Errorf("no se pudo crear el contacto automáticamente en Chatwoot")
+		fmt.Printf("🔍 [DEBUG CHATWOOT] Status: %d | Response: %s\n", respCreate.StatusCode, string(respBodyBytes))
+
+		if respCreate.StatusCode >= 400 {
+			return fmt.Errorf("chatwoot rechazó la creación (HTTP %d): %s", respCreate.StatusCode, string(respBodyBytes))
 		}
-		contactID = createResult.Payload.ID
+
+		var createResult struct {
+			Payload struct {
+				Contact struct {
+					ID int `json:"id"`
+				} `json:"contact"`
+				ID int `json:"id"`
+			} `json:"payload"`
+			Contact struct {
+				ID int `json:"id"`
+			} `json:"contact"`
+			ID int `json:"id"`
+		}
+
+		if err := json.Unmarshal(respBodyBytes, &createResult); err != nil {
+			return fmt.Errorf("error decodificando respuesta de Chatwoot: %w", err)
+		}
+
+		if createResult.Payload.Contact.ID != 0 {
+			contactID = createResult.Payload.Contact.ID
+		} else if createResult.Payload.ID != 0 {
+			contactID = createResult.Payload.ID
+		} else if createResult.Contact.ID != 0 {
+			contactID = createResult.Contact.ID
+		} else if createResult.ID != 0 {
+			contactID = createResult.ID
+		}
+
+		if contactID == 0 {
+			return fmt.Errorf("no se pudo extraer el ID del contacto del JSON recibido: %s", string(respBodyBytes))
+		}
 	}
 
 	// 3. Obtener las conversaciones del contacto
