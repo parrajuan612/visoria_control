@@ -213,10 +213,10 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 			fmt.Println(msgOk)
 			progressChan <- msgOk
 
-			// 2. Notificación en segundo plano a la API de Chatwoot
+			// 2. Notificación y autorregistro en Chatwoot
 			textoRegistro := fmt.Sprintf("📄 *Beca enviada por sistema*\n\nHola %s,\nTe hacemos entrega del documento oficial correspondiente a la beca del %s%% asignada a %s.\n\nPDF: %s", p.GuardianName, becaNum, p.Name, pdfURL)
 
-			if errCw := s.registrarEnChatwoot(phone, textoRegistro); errCw != nil {
+			if errCw := s.registrarEnChatwoot(phone, p.Name, textoRegistro); errCw != nil {
 				fmt.Printf("⚠️ Mensaje enviado por WhatsApp pero no se registró en Chatwoot (%s): %v\n", p.Name, errCw)
 			} else {
 				fmt.Printf("💬 Copia del mensaje registrada con éxito en Chatwoot para %s\n", p.Name)
@@ -229,8 +229,8 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 	return nil
 }
 
-// registrarEnChatwoot consulta el contacto por su número telefónico e inserta el mensaje enviado en su conversación
-func (s *visoriaService) registrarEnChatwoot(phone string, messageContent string) error {
+// registrarEnChatwoot busca o crea el contacto, asegura una conversación activa y registra el mensaje saliente
+func (s *visoriaService) registrarEnChatwoot(phone string, playerName string, messageContent string) error {
 	chatwootURL := os.Getenv("CHATWOOT_URL")
 	if chatwootURL == "" {
 		chatwootURL = "http://127.0.0.1:3000"
@@ -246,9 +246,15 @@ func (s *visoriaService) registrarEnChatwoot(phone string, messageContent string
 		accountID = "1"
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	inboxIDStr := os.Getenv("CHATWOOT_INBOX_ID")
+	if inboxIDStr == "" {
+		inboxIDStr = "2"
+	}
+	inboxID, _ := strconv.Atoi(inboxIDStr)
 
-	// Step A: Buscar contacto por número telefónico
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	// 1. Buscar contacto por número telefónico
 	searchURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/search?q=%s", chatwootURL, accountID, phone)
 	req, err := http.NewRequest("GET", searchURL, nil)
 	if err != nil {
@@ -268,13 +274,48 @@ func (s *visoriaService) registrarEnChatwoot(phone string, messageContent string
 		} `json:"payload"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil || len(searchResult.Payload) == 0 {
-		return fmt.Errorf("contacto con número %s no encontrado en Chatwoot", phone)
+	var contactID int
+	if json.NewDecoder(resp.Body).Decode(&searchResult) == nil && len(searchResult.Payload) > 0 {
+		contactID = searchResult.Payload[0].ID
 	}
 
-	contactID := searchResult.Payload[0].ID
+	// 2. Si el contacto no existe, crearlo automáticamente
+	if contactID == 0 {
+		createContactURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts", chatwootURL, accountID)
+		contactPayload := map[string]interface{}{
+			"phone_number": "+" + phone,
+			"name":         playerName,
+			"inbox_id":     inboxID,
+		}
+		bodyBytes, _ := json.Marshal(contactPayload)
+		reqCreate, err := http.NewRequest("POST", createContactURL, bytes.NewBuffer(bodyBytes))
+		if err != nil {
+			return fmt.Errorf("error creando petición de contacto: %w", err)
+		}
+		reqCreate.Header.Set("Content-Type", "application/json")
+		reqCreate.Header.Set("api_access_token", apiToken)
 
-	// Step B: Obtener las conversaciones del contacto
+		respCreate, err := client.Do(reqCreate)
+		if err != nil {
+			return fmt.Errorf("error al conectar con Chatwoot para crear contacto: %w", err)
+		}
+		defer respCreate.Body.Close()
+
+		var createResult struct {
+			Payload struct {
+				Contact struct {
+					ID int `json:"id"`
+				} `json:"contact"`
+			} `json:"payload"`
+		}
+
+		if err := json.NewDecoder(respCreate.Body).Decode(&createResult); err != nil || createResult.Payload.Contact.ID == 0 {
+			return fmt.Errorf("no se pudo crear el contacto automáticamente en Chatwoot")
+		}
+		contactID = createResult.Payload.Contact.ID
+	}
+
+	// 3. Obtener las conversaciones del contacto
 	convURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/%d/conversations", chatwootURL, accountID, contactID)
 	reqConv, err := http.NewRequest("GET", convURL, nil)
 	if err != nil {
@@ -294,21 +335,50 @@ func (s *visoriaService) registrarEnChatwoot(phone string, messageContent string
 		} `json:"payload"`
 	}
 
-	if err := json.NewDecoder(respConv.Body).Decode(&convResult); err != nil || len(convResult.Payload) == 0 {
-		return fmt.Errorf("sin conversaciones activas para el contacto %d", contactID)
+	var conversationID int
+	if json.NewDecoder(respConv.Body).Decode(&convResult) == nil && len(convResult.Payload) > 0 {
+		conversationID = convResult.Payload[0].ID
 	}
 
-	conversationID := convResult.Payload[0].ID
+	// 4. Si no tiene una conversación activa, crear una nueva
+	if conversationID == 0 {
+		createConvURL := fmt.Sprintf("%s/api/v1/accounts/%s/conversations", chatwootURL, accountID)
+		convPayload := map[string]interface{}{
+			"contact_id": contactID,
+			"inbox_id":   inboxID,
+		}
+		bodyBytes, _ := json.Marshal(convPayload)
+		reqConvCreate, err := http.NewRequest("POST", createConvURL, bytes.NewBuffer(bodyBytes))
+		if err != nil {
+			return fmt.Errorf("error creando petición de conversación: %w", err)
+		}
+		reqConvCreate.Header.Set("Content-Type", "application/json")
+		reqConvCreate.Header.Set("api_access_token", apiToken)
 
-	// Step C: Registrar el mensaje saliente en la conversación
+		respConvCreate, err := client.Do(reqConvCreate)
+		if err != nil {
+			return fmt.Errorf("error al conectar con Chatwoot para crear conversación: %w", err)
+		}
+		defer respConvCreate.Body.Close()
+
+		var newConv struct {
+			ID int `json:"id"`
+		}
+		if err := json.NewDecoder(respConvCreate.Body).Decode(&newConv); err != nil || newConv.ID == 0 {
+			return fmt.Errorf("no se pudo crear la conversación en Chatwoot")
+		}
+		conversationID = newConv.ID
+	}
+
+	// 5. Registrar el mensaje saliente en la conversación
 	msgURL := fmt.Sprintf("%s/api/v1/accounts/%s/conversations/%d/messages", chatwootURL, accountID, conversationID)
-	payload := map[string]interface{}{
+	msgPayload := map[string]interface{}{
 		"content":      messageContent,
 		"message_type": "outgoing",
 		"private":      false,
 	}
 
-	bodyBytes, _ := json.Marshal(payload)
+	bodyBytes, _ := json.Marshal(msgPayload)
 	reqMsg, err := http.NewRequest("POST", msgURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return err
