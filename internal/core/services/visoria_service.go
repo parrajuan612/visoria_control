@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"mime/multipart"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -168,9 +169,13 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 
 		// Reemplazamos espacios por guiones bajos
 		nombreSeguro := strings.ReplaceAll(p.Name, " ", "_")
+		baseURL := os.Getenv("BASE_URL")
+		if baseURL == "" {
+			baseURL = "https://chatmajestic.duckdns.org"
+		}
 
-		// 👉 LA CORRECCIÓN: Armamos la URL para que coincida exactamente con el nombre físico del archivo
-		pdfURL := fmt.Sprintf("https://porthole-cross-cassette.ngrok-free.dev/pdfs/%s_%s.pdf", nombreSeguro, p.FileID)
+		// Armamos la URL pública con el dominio SSL de Oracle Cloud
+		pdfURL := fmt.Sprintf("%s/pdfs/%s_%s.pdf", baseURL, nombreSeguro, p.FileID)
 
 		components := []interface{}{
 			map[string]interface{}{
