@@ -10,26 +10,24 @@ import (
 func InitRouter(r *gin.Engine, handler *handlers.VisoriaHandler) {
 	// Configuración de CORS profesional
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8880", "*"}, // Agregado el puerto de tu backend
+		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8880", "*"},
 		AllowMethods:     []string{"POST", "GET", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 	}))
 
-	// 👉 AGREGAR ESTA LÍNEA PARA HACER PÚBLICOS LOS PDFS:
+	// Hacer públicos los PDFs y archivos JS
 	r.Static("/pdfs", "./uploads/pdfs")
-
-	// 👇 NUEVO: Servir tu carpeta de frontend
-	// Esto expone todo el contenido de la carpeta "frontend" en la ruta "/app"
 	r.Static("/js", "./frontend/js")
 
-	// 👇 NUEVO: Redirigir la raíz ("/") directamente a tu index.html
+	// 👇 SOLUCIÓN: Servir el index.html tanto en la raíz ("/") como en ("/visoria")
+	r.StaticFile("/", "./frontend/index.html")
 	r.StaticFile("/visoria", "./frontend/index.html")
 
 	v1 := r.Group("/api/v1")
 	{
 		// Configuración
-		v1.POST("/config/load", handler.LoadConfig) // Carga el CSV de Google
+		v1.POST("/config/load", handler.LoadConfig)
 
 		// Flujo principal (Wizard)
 		v1.POST("/players/upload", handler.UploadPlayersExcel)
