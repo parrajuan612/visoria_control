@@ -1,9 +1,12 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -72,17 +75,17 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 
 		fechaNac := getCol(3)
 		var anio int
-		var fechaNacFormatted string // 👉 NUEVA VARIABLE
+		var fechaNacFormatted string
 
 		parsedDate := parseBirthDate(fechaNac)
 		if !parsedDate.IsZero() {
 			anio = parsedDate.Year()
-			fechaNacFormatted = parsedDate.Format("02/01/2006") // 👉 FORMATO DÍA/MES/AÑO
+			fechaNacFormatted = parsedDate.Format("02/01/2006")
 		} else {
 			if len(fechaNac) >= 4 {
 				anio, _ = strconv.Atoi(fechaNac[:4])
 			}
-			fechaNacFormatted = fechaNac // 👉 FALLBACK AL TEXTO ORIGINAL
+			fechaNacFormatted = fechaNac
 		}
 
 		torneoInfo, _ := s.repo.GetTournamentForPlayer(ctx, anio, beca)
@@ -94,10 +97,10 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 			PrimaryPhone: getCol(5),
 			Scholarship:  beca,
 			BirthYear:    anio,
-			BirthDate:    fechaNacFormatted, // 👉 ASIGNAMOS LA FECHA COMPLETA
+			BirthDate:    fechaNacFormatted,
 			Status:       "PENDING",
 			Tournament:   torneoInfo,
-			FileID:       fmt.Sprintf("%d", time.Now().UnixNano()), // 👉 Paso 2: ID único irrepetible
+			FileID:       fmt.Sprintf("%d", time.Now().UnixNano()),
 		}
 
 		if player.Name == "" || player.PrimaryPhone == "" || anio == 0 {
@@ -167,14 +170,12 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 
 		becaNum := strings.ReplaceAll(p.Scholarship, "%", "")
 
-		// Reemplazamos espacios por guiones bajos
 		nombreSeguro := strings.ReplaceAll(p.Name, " ", "_")
 		baseURL := os.Getenv("BASE_URL")
 		if baseURL == "" {
 			baseURL = "https://chatmajestic.duckdns.org"
 		}
 
-		// Armamos la URL pública con el dominio SSL de Oracle Cloud
 		pdfURL := fmt.Sprintf("%s/pdfs/%s_%s.pdf", baseURL, nombreSeguro, p.FileID)
 
 		components := []interface{}{
@@ -184,7 +185,7 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 					map[string]interface{}{
 						"type": "document",
 						"document": map[string]string{
-							"link":     pdfURL, // Meta ahora buscará la URL exacta con el ID único
+							"link":     pdfURL,
 							"filename": fmt.Sprintf("Beca_%s.pdf", nombreSeguro),
 						},
 					},
@@ -200,6 +201,7 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 			},
 		}
 
+		// 1. Envío de plantilla oficial por Meta API
 		err := s.waAPI.SendTemplate(context.Background(), phone, "purchase_receipt_3", "es_CO", components)
 
 		if err != nil {
@@ -210,10 +212,118 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 			msgOk := fmt.Sprintf("✅ Mensaje enviado a %s", p.Name)
 			fmt.Println(msgOk)
 			progressChan <- msgOk
+
+			// 2. Notificación en segundo plano a la API de Chatwoot
+			textoRegistro := fmt.Sprintf("📄 *Beca enviada por sistema*\n\nHola %s,\nTe hacemos entrega del documento oficial correspondiente a la beca del %s%% asignada a %s.\n\nPDF: %s", p.GuardianName, becaNum, p.Name, pdfURL)
+
+			if errCw := s.registrarEnChatwoot(phone, textoRegistro); errCw != nil {
+				fmt.Printf("⚠️ Mensaje enviado por WhatsApp pero no se registró en Chatwoot (%s): %v\n", p.Name, errCw)
+			} else {
+				fmt.Printf("💬 Copia del mensaje registrada con éxito en Chatwoot para %s\n", p.Name)
+			}
 		}
 
-		// 👉 AUMENTAMOS LA PAUSA A 6 SEGUNDOS PARA EVITAR QUE META NOS BLOQUEE POR SPAM
 		time.Sleep(6 * time.Second)
+	}
+
+	return nil
+}
+
+// registrarEnChatwoot consulta el contacto por su número telefónico e inserta el mensaje enviado en su conversación
+func (s *visoriaService) registrarEnChatwoot(phone string, messageContent string) error {
+	chatwootURL := os.Getenv("CHATWOOT_URL")
+	if chatwootURL == "" {
+		chatwootURL = "http://127.0.0.1:3000"
+	}
+
+	apiToken := os.Getenv("CHATWOOT_API_TOKEN")
+	if apiToken == "" {
+		return fmt.Errorf("CHATWOOT_API_TOKEN no está definido en las variables de entorno")
+	}
+
+	accountID := os.Getenv("CHATWOOT_ACCOUNT_ID")
+	if accountID == "" {
+		accountID = "1"
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// Step A: Buscar contacto por número telefónico
+	searchURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/search?q=%s", chatwootURL, accountID, phone)
+	req, err := http.NewRequest("GET", searchURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("api_access_token", apiToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	var searchResult struct {
+		Payload []struct {
+			ID int `json:"id"`
+		} `json:"payload"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&searchResult); err != nil || len(searchResult.Payload) == 0 {
+		return fmt.Errorf("contacto con número %s no encontrado en Chatwoot", phone)
+	}
+
+	contactID := searchResult.Payload[0].ID
+
+	// Step B: Obtener las conversaciones del contacto
+	convURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/%d/conversations", chatwootURL, accountID, contactID)
+	reqConv, err := http.NewRequest("GET", convURL, nil)
+	if err != nil {
+		return err
+	}
+	reqConv.Header.Set("api_access_token", apiToken)
+
+	respConv, err := client.Do(reqConv)
+	if err != nil {
+		return err
+	}
+	defer respConv.Body.Close()
+
+	var convResult struct {
+		Payload []struct {
+			ID int `json:"id"`
+		} `json:"payload"`
+	}
+
+	if err := json.NewDecoder(respConv.Body).Decode(&convResult); err != nil || len(convResult.Payload) == 0 {
+		return fmt.Errorf("sin conversaciones activas para el contacto %d", contactID)
+	}
+
+	conversationID := convResult.Payload[0].ID
+
+	// Step C: Registrar el mensaje saliente en la conversación
+	msgURL := fmt.Sprintf("%s/api/v1/accounts/%s/conversations/%d/messages", chatwootURL, accountID, conversationID)
+	payload := map[string]interface{}{
+		"content":      messageContent,
+		"message_type": "outgoing",
+		"private":      false,
+	}
+
+	bodyBytes, _ := json.Marshal(payload)
+	reqMsg, err := http.NewRequest("POST", msgURL, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return err
+	}
+	reqMsg.Header.Set("Content-Type", "application/json")
+	reqMsg.Header.Set("api_access_token", apiToken)
+
+	respMsg, err := client.Do(reqMsg)
+	if err != nil {
+		return err
+	}
+	defer respMsg.Body.Close()
+
+	if respMsg.StatusCode >= 400 {
+		return fmt.Errorf("respuesta de Chatwoot API: HTTP %d", respMsg.StatusCode)
 	}
 
 	return nil
