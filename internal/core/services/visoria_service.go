@@ -303,16 +303,14 @@ func (s *visoriaService) registrarEnChatwoot(phone string, playerName string, me
 
 		var createResult struct {
 			Payload struct {
-				Contact struct {
-					ID int `json:"id"`
-				} `json:"contact"`
+				ID int `json:"id"`
 			} `json:"payload"`
 		}
 
-		if err := json.NewDecoder(respCreate.Body).Decode(&createResult); err != nil || createResult.Payload.Contact.ID == 0 {
+		if err := json.NewDecoder(respCreate.Body).Decode(&createResult); err != nil || createResult.Payload.ID == 0 {
 			return fmt.Errorf("no se pudo crear el contacto automáticamente en Chatwoot")
 		}
-		contactID = createResult.Payload.Contact.ID
+		contactID = createResult.Payload.ID
 	}
 
 	// 3. Obtener las conversaciones del contacto
