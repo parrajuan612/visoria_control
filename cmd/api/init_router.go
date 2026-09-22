@@ -24,7 +24,7 @@ func InitRouter(r *gin.Engine, handler *handlers.VisoriaHandler) {
 	r.Static("/js", "./frontend/js")
 
 	// 👇 NUEVO: Redirigir la raíz ("/") directamente a tu index.html
-	r.StaticFile("/", "./frontend/index.html")
+	r.StaticFile("/visoria", "./frontend/index.html")
 
 	v1 := r.Group("/api/v1")
 	{
