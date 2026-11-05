@@ -146,8 +146,6 @@ async function startMassiveProcess() {
             bgClass = "bg-green-50 text-green-800 border-green-100";
             dotColor = "bg-green-500";
             icon = "✅";
-            successCount++;
-            statSuccess.innerText = successCount;
         } else if (type === 'error') {
             bgClass = "bg-red-50 text-red-800 border-red-100";
             dotColor = "bg-red-500";
@@ -200,23 +198,38 @@ async function startMassiveProcess() {
         logItem("Conectando con Meta API y Chatwoot para envío masivo...", "info");
         statStatus.innerText = "Enviando por WhatsApp...";
 
+        // Un incremento por destinatario: solo cuentan los mensajes de resultado
+        // (✅ enviado, ❌ error, ⚠️ omitido), no los "Enviando...".
         let processedCount = 0;
+        let failedCount = 0;
+        successCount = 0;
         await sendWhatsAppMessages(payloadPlayers, (msg) => {
+            if (msg.startsWith("✅")) {
+                successCount++;
+                statSuccess.innerText = successCount;
+                logItem(msg, "success");
+            } else if (msg.startsWith("❌") || msg.startsWith("⚠️")) {
+                failedCount++;
+                logItem(msg, msg.startsWith("⚠️") ? "warning" : "error");
+            } else {
+                logItem(msg, "info");
+                return;
+            }
+
             processedCount++;
             updateProgress(processedCount, totalPlayers);
-
-            if (msg.includes("Error") || msg.includes("rechazó")) {
-                logItem(msg, "error");
-            } else {
-                logItem(msg, "success");
-            }
         });
-        
-        updateProgress(totalPlayers, totalPlayers);
-        statStatus.innerText = "Completado con éxito";
-        logItem("¡Campaña masiva finalizada y registrada correctamente!", "success");
-        
-        alert("¡Todos los certificados y mensajes han sido enviados exitosamente!");
+
+        // "Aceptado por Meta" no es "entregado": la confirmación real llega por webhook (Fase 5).
+        if (failedCount === 0 && successCount === totalPlayers) {
+            statStatus.innerText = "Finalizado: todos aceptados por Meta";
+            logItem(`Campaña finalizada: ${successCount} mensajes aceptados por Meta (entrega aún sin confirmar).`, "info");
+            alert(`${successCount} mensajes fueron aceptados por Meta. La entrega aún no se puede confirmar desde este panel.`);
+        } else {
+            statStatus.innerText = `Finalizado con ${failedCount} fallidos u omitidos`;
+            logItem(`Campaña finalizada: ${successCount} aceptados por Meta, ${failedCount} fallidos u omitidos de ${totalPlayers}.`, "warning");
+            alert(`Campaña finalizada con novedades:\n${successCount} aceptados por Meta\n${failedCount} fallidos u omitidos\nRevisa el panel.`);
+        }
 
     } catch (error) {
         statStatus.innerText = "Error crítico";

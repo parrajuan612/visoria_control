@@ -156,6 +156,15 @@ func (s *visoriaService) GenerateDocuments(ctx context.Context, players []domain
 func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players []domain.Player, progressChan chan<- string) error {
 	for i, p := range players {
 		if p.Status != "PENDING" {
+			progressChan <- fmt.Sprintf("⚠️ Omitido %s: datos inválidos (%s)", p.Name, p.Status)
+			continue
+		}
+
+		// Nunca enviar si el PDF no existe: Meta respondería 200 y fallaría después al descargarlo.
+		nombrePDF := strings.ReplaceAll(p.Name, " ", "_")
+		rutaPDF := fmt.Sprintf("uploads/pdfs/%s_%s.pdf", nombrePDF, p.FileID)
+		if info, errPDF := os.Stat(rutaPDF); errPDF != nil || info.Size() == 0 {
+			progressChan <- fmt.Sprintf("❌ Error: no se envió a %s porque su PDF no existe o no se generó", p.Name)
 			continue
 		}
 
