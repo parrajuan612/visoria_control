@@ -1,0 +1,52 @@
+# Redis propio de Visoria (ADR-4): separado del Redis de Chatwoot porque el de
+# Chatwoot/Sidekiq puede tener políticas de expulsión que borrarían la cola.
+#
+#   docker compose up -d            # redis + asynqmon
+#   REDIS_ADDR=127.0.0.1:6380       # en .env (el 6379 suele estar ocupado por Chatwoot)
+#
+# La contraseña sale de REDIS_PASSWORD (.env); compose falla si no está definida.
+services:
+  redis-visoria:
+    image: redis:7-alpine
+    container_name: redis-visoria
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_PASSWORD:?define REDIS_PASSWORD en .env}
+    ports:
+      # Solo loopback: nunca expuesto a la red.
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - redis-visoria-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+
+  # Panel web de la cola (solo localhost). Acceso remoto: túnel SSH al 8085.
+  asynqmon:
+    image: hibiken/asynqmon:latest
+    container_name: asynqmon-visoria
+    restart: unless-stopped
+    command:
+      - --redis-addr=redis-visoria:6379
+      - --redis-password=${REDIS_PASSWORD}
+      - --port=8080
+    ports:
+      - "127.0.0.1:8085:8080"
+    depends_on:
+      redis-visoria:
+        condition: service_healthy
+
+volumes:
+  redis-visoria-data:

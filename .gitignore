@@ -1,0 +1,18 @@
+# Secretos
+.env
+.env.*
+!.env.example
+
+# Datos generados / PII (PDFs con datos de menores)
+uploads/
+data/
+
+# Material del cliente con datos reales
+MajesticBecas*
+*.zip
+
+# Binarios
+/bin/
+
+# Carpetas de trabajo de las pruebas con LibreOffice (snap no lee /tmp)
+lo-test-*/

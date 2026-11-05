@@ -1,0 +1,164 @@
+package config
+
+import (
+	"strings"
+	"testing"
+	"time"
+)
+
+func lookup(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func validEnv() map[string]string {
+	return map[string]string{
+		"BASE_URL":           "https://ejemplo.test/",
+		"WHATSAPP_TOKEN":     "tok",
+		"WHATSAPP_PHONE_ID":  "123",
+		"CHATWOOT_API_TOKEN": "cw",
+		"REDIS_ADDR":         "127.0.0.1:6380",
+	}
+}
+
+func TestFaltanObligatorias(t *testing.T) {
+	_, err := fromLookup(lookup(map[string]string{}))
+	if err == nil {
+		t.Fatal("se esperaba error")
+	}
+	for _, k := range []string{"BASE_URL", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID", "CHATWOOT_API_TOKEN", "REDIS_ADDR"} {
+		if !strings.Contains(err.Error(), k) {
+			t.Errorf("el error debe mencionar %s: %v", k, err)
+		}
+	}
+}
+
+func TestDefaultsYNormalizacion(t *testing.T) {
+	c, err := fromLookup(lookup(validEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BaseURL != "https://ejemplo.test" {
+		t.Errorf("BaseURL = %q", c.BaseURL)
+	}
+	if c.Port != "8880" || c.Chatwoot.InboxID != 2 || c.Chatwoot.AccountID != "1" {
+		t.Errorf("defaults inesperados: %+v", c)
+	}
+	if c.SheetsURL != "" {
+		t.Errorf("SheetsURL debe ser opcional: %q", c.SheetsURL)
+	}
+	if c.WhatsAppPause != 6*time.Second {
+		t.Errorf("pausa = %v", c.WhatsAppPause)
+	}
+	if c.Redis.Addr != "127.0.0.1:6380" || c.SMTP.Enabled() {
+		t.Errorf("Redis/SMTP inesperados: %+v %+v", c.Redis, c.SMTP)
+	}
+}
+
+func TestCORSOrigenes(t *testing.T) {
+	e := validEnv()
+	e["CORS_ALLOWED_ORIGINS"] = " https://a.test/ , ,https://b.test"
+	c, err := fromLookup(lookup(e))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(c.CORSOrigins, ",")
+	want := "http://localhost:8880,https://ejemplo.test,https://a.test,https://b.test"
+	if got != want {
+		t.Errorf("CORS = %s, quería %s", got, want)
+	}
+}
+
+func TestValoresInvalidos(t *testing.T) {
+	e := validEnv()
+	e["CHATWOOT_INBOX_ID"] = "dos"
+	e["WHATSAPP_PAUSE"] = "rápido"
+	e["SMTP_USER"] = "becas@gmail.com"
+	_, err := fromLookup(lookup(e))
+	if err == nil {
+		t.Fatal("se esperaba error")
+	}
+	for _, s := range []string{"CHATWOOT_INBOX_ID", "WHATSAPP_PAUSE", "SMTP_APP_PASSWORD"} {
+		if !strings.Contains(err.Error(), s) {
+			t.Errorf("falta %s en: %v", s, err)
+		}
+	}
+}
+
+func TestRedisPasswordObligatoriaEnProduccion(t *testing.T) {
+	e := validEnv()
+	e["APP_ENV"] = "production"
+	if _, err := fromLookup(lookup(e)); err == nil || !strings.Contains(err.Error(), "REDIS_PASSWORD") {
+		t.Fatalf("debía exigir REDIS_PASSWORD: %v", err)
+	}
+	e["REDIS_PASSWORD"] = "x"
+	if _, err := fromLookup(lookup(e)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDataDir(t *testing.T) {
+	c, err := fromLookup(lookup(validEnv()))
+	if err != nil || c.DataDir != "data" {
+		t.Fatalf("por defecto debe ser «data»: %q %v", c.DataDir, err)
+	}
+	e := validEnv()
+	e["DATA_DIR"] = " /var/lib/visoria "
+	if c, _ = fromLookup(lookup(e)); c.DataDir != "/var/lib/visoria" {
+		t.Errorf("DATA_DIR = %q", c.DataDir)
+	}
+}
+
+func TestDocs(t *testing.T) {
+	c, err := fromLookup(lookup(validEnv()))
+	if err != nil || c.Docs.BatchSize != 25 || c.Docs.Timeout != 10*time.Minute || c.Docs.SofficePath != "" || c.Docs.WorkDir != "" {
+		t.Fatalf("por defecto (SDD: lote 25, plazo 10 min): %+v %v", c.Docs, err)
+	}
+	e := validEnv()
+	e["SOFFICE_PATH"], e["DOCS_BATCH_SIZE"], e["DOCS_TIMEOUT"], e["DOCS_WORKDIR"] = "/usr/bin/soffice", "10", "3m", "/var/tmp/docs"
+	if c, err = fromLookup(lookup(e)); err != nil || c.Docs.BatchSize != 10 || c.Docs.Timeout != 3*time.Minute || c.Docs.SofficePath != "/usr/bin/soffice" || c.Docs.WorkDir != "/var/tmp/docs" {
+		t.Errorf("valores: %+v %v", c.Docs, err)
+	}
+	for _, bad := range []string{"0", "101", "x"} {
+		e["DOCS_BATCH_SIZE"] = bad
+		if _, err := fromLookup(lookup(e)); err == nil || !strings.Contains(err.Error(), "DOCS_BATCH_SIZE") {
+			t.Errorf("DOCS_BATCH_SIZE=%q debía fallar: %v", bad, err)
+		}
+	}
+}
+
+func TestCorreoYWhatsAppDeEnvio(t *testing.T) {
+	c, err := fromLookup(lookup(validEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SMTP.Enabled() || c.SMTP.Host != "smtp.gmail.com" || c.SMTP.Port != 587 || c.SMTP.Security != "starttls" || c.SMTP.DailyQuota != 450 ||
+		c.SMTP.Pause != 1500*time.Millisecond || c.SMTP.FromName != "Majestic Intercambio Deportivo" {
+		t.Errorf("SMTP por defecto: %+v", c.SMTP)
+	}
+	if c.WhatsApp.Template != "purchase_receipt_3" || c.WhatsApp.Language != "es_CO" || c.WhatsApp.RatePerSec != 5 || len(c.DispatchAllowlist) != 0 {
+		t.Errorf("WhatsApp por defecto: %+v %v", c.WhatsApp, c.DispatchAllowlist)
+	}
+	e := validEnv()
+	e["SMTP_USER"], e["SMTP_APP_PASSWORD"] = "becas@gmail.com", "abcd efgh ijkl mnop"
+	e["WHATSAPP_RATE_PER_SEC"], e["WHATSAPP_TEMPLATE"] = "2,5", "otra_plantilla"
+	e["DISPATCH_ALLOWLIST"] = " 573209323449 , a@b.co,, "
+	c, err = fromLookup(lookup(e))
+	if err != nil || !c.SMTP.Enabled() || c.SMTP.AppPassword != "abcdefghijklmnop" || c.WhatsApp.RatePerSec != 2.5 || c.WhatsApp.Template != "otra_plantilla" ||
+		len(c.DispatchAllowlist) != 2 || c.DispatchAllowlist[0] != "573209323449" {
+		t.Errorf("con valores: %+v %v %v", c.SMTP, c.WhatsApp, c.DispatchAllowlist)
+	}
+	// Usuario sin contraseña de aplicación; seguridad desconocida; ritmo fuera de rango.
+	for _, kv := range [][2]string{{"SMTP_USER", "x@gmail.com"}, {"SMTP_SECURITY", "ssl"}, {"WHATSAPP_RATE_PER_SEC", "500"}, {"WHATSAPP_RATE_PER_SEC", "abc"}} {
+		bad := validEnv()
+		bad[kv[0]] = kv[1]
+		if _, err := fromLookup(lookup(bad)); err == nil || !strings.Contains(err.Error(), map[string]string{"SMTP_USER": "SMTP_APP_PASSWORD", "SMTP_SECURITY": "SMTP_SECURITY", "WHATSAPP_RATE_PER_SEC": "WHATSAPP_RATE_PER_SEC"}[kv[0]]) {
+			t.Errorf("%v debía fallar: %v", kv, err)
+		}
+	}
+	// Servidor local de pruebas: sin contraseña.
+	e = validEnv()
+	e["SMTP_USER"], e["SMTP_SECURITY"], e["SMTP_HOST"] = "a@b.co", "none", "127.0.0.1"
+	if c, err := fromLookup(lookup(e)); err != nil || !c.SMTP.Enabled() {
+		t.Errorf("modo none: %v", err)
+	}
+}
