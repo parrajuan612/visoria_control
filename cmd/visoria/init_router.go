@@ -7,12 +7,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *httpadapter.ConfigHandler, allowedOrigins []string) {
+func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *httpadapter.ConfigHandler, campHandler *httpadapter.CampaignHandler, allowedOrigins []string) {
 	// CORS restringido a orígenes explícitos (el frontend es same-origin, así que
 	// en producción basta con BASE_URL). Nunca "*" junto con credenciales.
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     allowedOrigins,
-		AllowMethods:     []string{"POST", "GET", "OPTIONS"},
+		AllowMethods:     []string{"POST", "GET", "PATCH", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 	}))
@@ -30,6 +30,13 @@ func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *
 		// Configuración maestra (Google Sheets)
 		v1.GET("/config", cfgHandler.Get)
 		v1.POST("/config/sync", cfgHandler.Sync)
+
+		// Campañas: importación, validación y corrección de filas
+		v1.GET("/campaigns", campHandler.List)
+		v1.POST("/campaigns", campHandler.Create)
+		v1.GET("/campaigns/:id", campHandler.Get)
+		v1.GET("/campaigns/:id/players", campHandler.Players)
+		v1.PATCH("/campaigns/:id/recipients/:rid", campHandler.EditRecipient)
 
 		// Flujo principal (Wizard)
 		v1.POST("/players/upload", handler.UploadPlayersExcel)

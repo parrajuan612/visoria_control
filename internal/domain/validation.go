@@ -15,6 +15,9 @@ type ValidationOptions struct {
 	// RequireBothChannels convierte en ERROR que falte (o sea inválido) el móvil o el correo.
 	// Por defecto una fila es válida si tiene al menos un canal válido (D3).
 	RequireBothChannels bool
+	// FechasPago es el número de fechas de pago de la campaña (0 = no comprobar). Una beca
+	// cuyo plan tiene más pagos que fechas no se puede generar: la fila queda con error.
+	FechasPago int
 }
 
 // Campos de los hallazgos: los mismos nombres de columna del Excel del cliente.
@@ -220,7 +223,7 @@ func squash(s string) string { return strings.Join(strings.Fields(s), " ") }
 // con al menos un canal válido (móvil o correo).
 func ValidateRow(raw RawRow, cfg MasterConfig, opt ValidationOptions) Recipient {
 	r := Recipient{
-		Fila: raw.Fila, Jugador: squash(raw.Jugador), Club: squash(raw.Club), Acudiente: squash(raw.Acudiente),
+		Fila: raw.Fila, Raw: raw, Jugador: squash(raw.Jugador), Club: squash(raw.Club), Acudiente: squash(raw.Acudiente),
 		Torneos: []string{}, Correos: []string{}, Issues: []Issue{},
 	}
 	add := func(n IssueLevel, campo, msg string, a ...any) {
@@ -244,8 +247,14 @@ func ValidateRow(raw RawRow, cfg MasterConfig, opt ValidationOptions) Recipient 
 		return r
 	default:
 		r.Beca = key
-		if _, ok := cfg.Beca(key); !ok {
+		b, ok := cfg.Beca(key)
+		switch {
+		case !ok:
 			add(IssueError, CampoBeca, "BECA «%s» no es válida (debe ser %s).", strings.TrimSpace(raw.Beca), becasValidas(cfg))
+		case len(b.Pagos) == 0:
+			add(IssueError, CampoBeca, "«%s» no tiene plan de pagos configurado (ver Configuración).", BecaLabel(key))
+		case opt.FechasPago > 0 && len(b.Pagos) > opt.FechasPago:
+			add(IssueError, CampoBeca, "«%s» necesita las fechas de los %d primeros pagos y la campaña solo tiene %d.", BecaLabel(key), len(b.Pagos), opt.FechasPago)
 		}
 	}
 

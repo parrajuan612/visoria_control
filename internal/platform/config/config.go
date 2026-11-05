@@ -19,7 +19,9 @@ type Config struct {
 	Env      string // development | production
 	Port     string
 	LogLevel string // debug|info|warn|error
-	BaseURL  string // URL pública, sin "/" final
+	// DataDir es la carpeta de artefactos y auditoría de las campañas (EXCEL_ORIGINAL.xlsx, events.jsonl…).
+	DataDir string
+	BaseURL string // URL pública, sin "/" final
 	// Orígenes CORS permitidos (BASE_URL + localhost + CORS_ALLOWED_ORIGINS).
 	CORSOrigins []string
 
@@ -131,6 +133,7 @@ func fromLookup(get func(string) string) (*Config, error) {
 		Env:       str("APP_ENV", "development"),
 		Port:      str("PORT", "8880"),
 		LogLevel:  str("LOG_LEVEL", "info"),
+		DataDir:   str("DATA_DIR", "data"),
 		BaseURL:   strings.TrimRight(required("BASE_URL"), "/"),
 		SheetsURL: str("SHEETS_CSV_URL", ""),
 		WhatsApp: WhatsApp{

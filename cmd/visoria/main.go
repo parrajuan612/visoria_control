@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"visoria-control/internal/adapters/asynqueue"
+	"visoria-control/internal/adapters/campaignfs"
 	"visoria-control/internal/adapters/excel"
 	"visoria-control/internal/adapters/redisstore"
 	"visoria-control/internal/adapters/sheets"
@@ -79,6 +80,12 @@ func run() int {
 	cfgSvc := app.NewConfigService(sheets.NewSource(), redisstore.NewConfigStore(rdb), tournamentRepo,
 		cfg.SheetsURL, sheets.ValidateGoogleSheetsURL)
 	importer := app.NewImportService(excel.NewReader(), tournamentRepo)
+	files, err := campaignfs.New(cfg.DataDir)
+	if err != nil {
+		slog.Error("no se pudo preparar DATA_DIR", "dir", cfg.DataDir, "error", err)
+		return 1
+	}
+	campaignSvc := app.NewCampaignService(excel.NewReader(), tournamentRepo, redisstore.NewCampaignRepo(rdb), files)
 	restoreCtx, cancelRestore := context.WithTimeout(ctx, 30*time.Second)
 	if err := cfgSvc.Restore(restoreCtx); err != nil {
 		// No impide arrancar: se puede sincronizar luego desde la pantalla de configuración.
@@ -107,7 +114,7 @@ func run() int {
 		}
 		r := gin.New()
 		r.Use(RequestLogger(logger), Recovery())
-		SetupRoutes(r, cfg, rdb, queue, tournamentRepo, importer, cfgSvc)
+		SetupRoutes(r, cfg, rdb, queue, tournamentRepo, importer, cfgSvc, campaignSvc)
 
 		ln, err := net.Listen("tcp", ":"+cfg.Port)
 		if err != nil {

@@ -95,3 +95,15 @@ func TestRedisPasswordObligatoriaEnProduccion(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDataDir(t *testing.T) {
+	c, err := fromLookup(lookup(validEnv()))
+	if err != nil || c.DataDir != "data" {
+		t.Fatalf("por defecto debe ser «data»: %q %v", c.DataDir, err)
+	}
+	e := validEnv()
+	e["DATA_DIR"] = " /var/lib/visoria "
+	if c, _ = fromLookup(lookup(e)); c.DataDir != "/var/lib/visoria" {
+		t.Errorf("DATA_DIR = %q", c.DataDir)
+	}
+}

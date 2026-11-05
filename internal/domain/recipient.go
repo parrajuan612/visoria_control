@@ -38,6 +38,7 @@ type Recipient struct {
 	Issues    []Issue        `json:"issues"`
 	Estado    RecipientState `json:"estado"`
 	Editado   bool           `json:"editado"` // true si se corrigió en pantalla (auditado)
+	Raw       RawRow         `json:"raw"`     // celdas tal como están (originales o ya corregidas)
 }
 
 // HasWhatsApp / HasEmail indican qué canales tiene datos válidos.

@@ -47,11 +47,15 @@ func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart
 	if err != nil {
 		return nil, domain.BatchSummary{}, err
 	}
-	players := make([]domain.Player, 0, len(res.Recipients))
-	for _, r := range res.Recipients {
+	return s.ToPlayers(ctx, res.Recipients), res.Summary, nil
+}
+
+func (s *visoriaService) ToPlayers(ctx context.Context, recs []domain.Recipient) []domain.Player {
+	players := make([]domain.Player, 0, len(recs))
+	for _, r := range recs {
 		players = append(players, s.toPlayer(ctx, r))
 	}
-	return players, res.Summary, nil
+	return players
 }
 
 // toPlayer adapta un destinatario validado al modelo del flujo actual (se retira cuando
