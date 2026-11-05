@@ -27,18 +27,28 @@ func TestParseBirthYear(t *testing.T) {
 	}
 }
 
+// Casos portados de test_beca_formatos (MajesticBecas/tests/test_basico.py).
 func TestParseBecaCell(t *testing.T) {
-	ok := map[string]BecaKey{"50%": "50", "50": "50", " 30 % ": "30", "0,5": "50", "0.7": "70", "0.7000000000000001": "70",
-		"SIN BECA": BecaSinBeca, "sin beca": BecaSinBeca, "100": "100", "ACOMPAÑANTE": BecaAcompanante, "50.0": "50"}
+	ok := map[string]BecaKey{
+		"50": "50", "50%": "50", "Beca 70": "70", "0.3": "30", "0,3": "30", "0.30000000000000004": "30", "1": "100", "1.0": "100",
+		"Sin beca": BecaSinBeca, "SIN BECA": BecaSinBeca, "ninguna": BecaSinBeca, "No": BecaSinBeca, "0": BecaSinBeca,
+		" 30 % ": "30", "100": "100", "ACOMPAÑANTE": BecaAcompanante, "0,5": "50", "0.7": "70",
+	}
 	for in, want := range ok {
 		if got, err := ParseBecaCell(in); err != nil || got != want {
-			t.Errorf("%q → %q %v", in, got, err)
+			t.Errorf("ParseBecaCell(%q)=%q,%v quería %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "VIP", "150", "0", "-5", "abc%"} {
-		if _, err := ParseBecaCell(bad); err == nil {
-			t.Errorf("%q debía fallar", bad)
+	// El texto de los errores es el del cliente.
+	cases := map[string]string{"": "La casilla BECA está vacía.", "   ": "La casilla BECA está vacía.", "VIP": "BECA «VIP» no es un número válido", "abc%": "BECA «abc%» no es un número válido", "150": "BECA «150» no es válida"}
+	for in, want := range cases {
+		if _, err := ParseBecaCell(in); err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("ParseBecaCell(%q) debía fallar con %q: %v", in, want, err)
 		}
+	}
+	// 45 se lee como número (la validez contra la hoja la decide ValidateRow).
+	if k, err := ParseBecaCell("45"); err != nil || k != "45" {
+		t.Errorf("45: %q %v", k, err)
 	}
 }
 
@@ -68,7 +78,7 @@ func TestNormalizePhone(t *testing.T) {
 		}
 	}
 	// El mensaje reproduce el ejemplo del SDD.
-	if _, err := NormalizePhone("31245"); err == nil || err.Error() != "MOVIL «31245» está incompleto (10 dígitos)" {
+	if _, err := NormalizePhone("31245"); err == nil || err.Error() != "MOVIL «31245» está incompleto." {
 		t.Errorf("mensaje: %v", err)
 	}
 	if NationalPhone("573209323449") != "3209323449" || NationalPhone("34612345678") != "34612345678" {
@@ -127,8 +137,13 @@ func TestValidateRowSinBecaSeOmite(t *testing.T) {
 	if r.Estado != RecipientOmitted || HasErrors(r.Issues) || !issue(r, IssueInfo, CampoBeca, "SIN BECA") {
 		t.Errorf("omitida: %+v", r)
 	}
+	// Portado de test_sin_beca_se_omite_sin_error: «todo mal, pero no importa: no lleva propuesta».
+	r = ValidateRow(row(4, "Pepe Pérez", "", "Sin beca", "2001", "", "", ""), cfgReal(), ValidationOptions{})
+	if r.Estado != RecipientOmitted || len(r.Issues) != 1 || r.Issues[0].Nivel != IssueInfo {
+		t.Errorf("SIN BECA debe anular todos los demás hallazgos: %+v", r.Issues)
+	}
 	// Una beca vacía NO es "sin beca": es un error.
-	if r := ValidateRow(row(4, "JUAN", "C", "", "2012", "A", "3209323449", ""), cfgReal(), ValidationOptions{}); r.Estado != RecipientInvalid || !issue(r, IssueError, CampoBeca, "falta la beca") {
+	if r := ValidateRow(row(5, "JUAN", "C", "", "2012", "A", "3209323449", ""), cfgReal(), ValidationOptions{}); r.Estado != RecipientInvalid || !issue(r, IssueError, CampoBeca, "La casilla BECA está vacía.") {
 		t.Errorf("beca vacía: %+v", r)
 	}
 }
@@ -139,7 +154,7 @@ func TestValidateRowObligatorios(t *testing.T) {
 		t.Fatal("debía ser inválida")
 	}
 	for _, c := range []string{CampoJugador, CampoClub, CampoAcudiente} {
-		if !issue(r, IssueError, c, "falta el dato") {
+		if !issue(r, IssueError, c, "La casilla está vacía.") {
 			t.Errorf("falta el error de %s", c)
 		}
 	}
@@ -153,11 +168,11 @@ func TestValidateRowBecaYAnio(t *testing.T) {
 		camp string
 		sub  string
 	}{
-		{"beca inválida", row(2, "J", "C", "VIP", "2012", "A", "3209323449", ""), CampoBeca, "no es válida"},
-		{"beca fuera de la hoja", row(2, "J", "C", "40%", "2012", "A", "3209323449", ""), CampoBeca, "no existe en la configuración"},
-		{"año vacío", row(2, "J", "C", "50%", "", "A", "3209323449", ""), CampoAnio, "falta el año"},
-		{"año inválido", row(2, "J", "C", "50%", "20x2", "A", "3209323449", ""), CampoAnio, "no es válido"},
-		{"año sin categoría", row(2, "J", "C", "50%", "2020", "A", "3209323449", ""), CampoCategoria, "año 2020"},
+		{"beca inválida", row(2, "J", "C", "VIP", "2012", "A", "3209323449", ""), CampoBeca, "BECA «VIP» no es un número válido (debe ser 30, 50, 70, 100, ACOMPAÑANTE o SIN BECA)."},
+		{"beca fuera de la hoja", row(2, "J", "C", "40%", "2012", "A", "3209323449", ""), CampoBeca, "BECA «40%» no es válida (debe ser 30, 50, 70, 100, ACOMPAÑANTE o SIN BECA)."},
+		{"año vacío", row(2, "J", "C", "50%", "", "A", "3209323449", ""), CampoAnio, "La casilla está vacía."},
+		{"año inválido", row(2, "J", "C", "50%", "20x2", "A", "3209323449", ""), CampoAnio, "«20x2» no es un año válido"},
+		{"año sin categoría", row(2, "J", "C", "50%", "2020", "A", "3209323449", ""), CampoCategoria, "El año 2020 no pertenece a ninguna categoría del programa."},
 		{"año sin torneo", row(2, "J", "C", "50%", "2020", "A", "3209323449", ""), CampoTorneo, "año 2020"},
 	}
 	for _, c := range cases {
@@ -200,7 +215,7 @@ func TestValidateRowCanales(t *testing.T) {
 		t.Errorf("móvil inválido: %+v", r.Issues)
 	}
 	// Correo inválido + móvil válido → válida.
-	if r := base("3209323449", "sin-arroba", def); r.Estado != RecipientValid || !issue(r, IssueWarning, CampoCorreo, "no es válido") {
+	if r := base("3209323449", "sin-arroba", def); r.Estado != RecipientValid || !issue(r, IssueWarning, CampoCorreo, "no es un correo válido") {
 		t.Errorf("correo inválido: %+v", r.Issues)
 	}
 	// Ninguno → error.
@@ -209,12 +224,12 @@ func TestValidateRowCanales(t *testing.T) {
 	}
 	// Ambos presentes pero inválidos → errores en cada columna + canales.
 	r := base("31245", "malo", def)
-	if r.Estado != RecipientInvalid || !issue(r, IssueError, CampoMovil, "incompleto") || !issue(r, IssueError, CampoCorreo, "no es válido") || !issue(r, IssueError, CampoCanales, "ningún canal") {
+	if r.Estado != RecipientInvalid || !issue(r, IssueError, CampoMovil, "incompleto") || !issue(r, IssueError, CampoCorreo, "no es un correo válido") || !issue(r, IssueError, CampoCanales, "ningún canal") {
 		t.Errorf("ambos inválidos: %+v", r.Issues)
 	}
 	// Varios correos: se conservan los válidos y se avisa de los inválidos.
 	r = base("", "a@b.co; roto, c@d.org", def)
-	if len(r.Correos) != 2 || !issue(r, IssueWarning, CampoCorreo, "se ignora el correo no válido «roto»") {
+	if len(r.Correos) != 2 || !issue(r, IssueWarning, CampoCorreo, "CORREO «roto» no es un correo válido; se ignora") {
 		t.Errorf("varios correos: %+v", r)
 	}
 	// Error de digitación frecuente en el dominio.
@@ -237,22 +252,26 @@ func TestValidateRowCanales(t *testing.T) {
 func TestValidateBatchDuplicadosYResumen(t *testing.T) {
 	cfg := cfgReal()
 	rows := []RawRow{
-		row(2, "Ana Gómez", "C", "50%", "2012", "A", "3209323449", ""),
-		row(3, "ANA  GOMEZ", "C", "30%", "2012", "A", "3001112233", ""), // mismo nombre y año → duplicado
-		row(4, "Ana Gómez", "C", "50%", "2013", "A", "3209323449", ""),  // otro año → distinto
+		row(2, "Ana Gómez", "C", "50%", "2012", "A", "3209323449", "a@b.co"),
+		row(3, "ANA  GOMEZ", "C", "30%", "2012", "A", "3001112233", "a@b.co"), // mismo nombre y año → advertencia (como el cliente)
+		row(4, "Ana Gómez", "C", "50%", "2013", "A", "3209323449", "a@b.co"),  // otro año → distinto
 		row(5, "Luis", "C", "SIN BECA", "2012", "A", "", ""),
 		row(6, "Luis", "C", "SIN BECA", "2012", "A", "", ""), // omitidas no cuentan como duplicado
 		row(7, "Pedro", "C", "50%", "2020", "A", "3209323449", ""),
 	}
 	rs := ValidateBatch(rows, cfg, ValidationOptions{})
-	if rs[0].Estado != RecipientValid || rs[1].Estado != RecipientInvalid || !issue(rs[1], IssueError, CampoDuplicado, "ya aparece en la fila 2") || rs[2].Estado != RecipientValid {
-		t.Errorf("duplicados: %v %v %v", rs[0].Estado, rs[1].Estado, rs[2].Estado)
+	// El cliente los genera igual y solo avisa: «Este jugador también aparece en la fila N.»
+	if rs[1].Estado != RecipientValid || !issue(rs[1], IssueWarning, CampoJugador, "Este jugador también aparece en la fila 2.") {
+		t.Errorf("duplicado: %v %+v", rs[1].Estado, rs[1].Issues)
+	}
+	if rs[0].Estado != RecipientValid || len(rs[0].Issues) != 0 || rs[2].Estado != RecipientValid || len(rs[2].Issues) != 0 {
+		t.Errorf("la primera aparición y el otro año no llevan aviso: %+v %+v", rs[0].Issues, rs[2].Issues)
 	}
 	if rs[3].Estado != RecipientOmitted || rs[4].Estado != RecipientOmitted || rs[5].Estado != RecipientInvalid {
 		t.Errorf("estados: %v %v %v", rs[3].Estado, rs[4].Estado, rs[5].Estado)
 	}
 	s := Summarize(rs)
-	if s.Total != 6 || s.Validas != 2 || s.ConErrores != 2 || s.Omitidas != 2 {
+	if s.Total != 6 || s.Validas != 3 || s.ConErrores != 1 || s.Omitidas != 2 || s.Advertencias != 1 {
 		t.Errorf("resumen: %+v", s)
 	}
 	// Las filas válidas con advertencias se cuentan aparte.

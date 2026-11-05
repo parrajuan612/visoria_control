@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"visoria-control/internal/adapters/sheets"
 	"visoria-control/internal/domain"
 	"visoria-control/internal/ports"
 
@@ -174,5 +177,40 @@ func TestLecturaMasValidacion(t *testing.T) {
 	}
 	if tel, err := domain.NormalizePhone(rows[0].Movil); err != nil || tel != "573209323449" {
 		t.Errorf("el móvil numérico de Excel debe normalizarse: %q %v", tel, err)
+	}
+}
+
+// Paridad con el sistema del cliente: su Excel de ejemplo (MajesticBecas/tests/DATOS_VISORIAS_ejemplo.xlsx)
+// debe leerse sin errores, igual que en test_excel_de_ejemplo. La carpeta del cliente no se versiona,
+// así que el test se omite cuando no está.
+func TestExcelDeEjemploDelCliente(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "MajesticBecas (2)", "MajesticBecas", "majestic_becas", "tests", "DATOS_VISORIAS_ejemplo.xlsx")
+	f, err := os.Open(path)
+	if err != nil {
+		t.Skip("no está la carpeta MajesticBecas del cliente; se omite la prueba de paridad")
+	}
+	defer f.Close()
+	rows, err := NewReader().Read(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 4 {
+		t.Fatalf("el ejemplo del cliente tiene 4 jugadores, se leyeron %d", len(rows))
+	}
+	for _, r := range rows {
+		if r.Jugador == "" || r.Club == "" || r.Beca == "" || r.Anio == "" || r.Acudiente == "" || r.Movil == "" || r.Correo == "" {
+			t.Errorf("fila %d con celdas sin leer: %+v", r.Fila, r)
+		}
+	}
+	// Con la configuración real (hoja de Google), ninguna fila tiene errores.
+	data, err := os.ReadFile(filepath.Join("..", "sheets", "testdata", "informacion_torneos.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _ := sheets.Parse(bytes.NewReader(data))
+	for _, rec := range domain.ValidateBatch(rows, cfg, domain.ValidationOptions{}) {
+		if rec.Estado != domain.RecipientValid || domain.HasErrors(rec.Issues) {
+			t.Errorf("fila %d debía ser válida: %+v", rec.Fila, rec.Issues)
+		}
 	}
 }

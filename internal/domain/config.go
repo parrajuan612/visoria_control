@@ -27,7 +27,11 @@ const (
 )
 
 // BecasRequeridas son las claves que la hoja debe tener siempre.
-var BecasRequeridas = []BecaKey{BecaSinBeca, "30", "50", "70", "100"}
+var BecasRequeridas = []BecaKey{BecaSinBeca, "30", "50", "70", "100", BecaAcompanante}
+
+// BecasConPlan reciben propuesta: su plan de pagos es obligatorio (SIN BECA y ACOMPAÑANTE solo
+// aportan su precio a la tabla de costos).
+var BecasConPlan = []BecaKey{"30", "50", "70", "100"}
 
 // MaxPagos es el máximo de cuotas de un plan de pagos.
 const MaxPagos = 3
@@ -247,8 +251,11 @@ func (c MasterConfig) Validate() []Issue {
 		if b.Total <= 0 {
 			add(IssueError, w, "el precio total debe ser mayor que cero")
 		}
-		if len(b.Pagos) == 0 {
+		if len(b.Pagos) == 0 && contieneBeca(BecasConPlan, b.Clave) {
 			add(IssueError, w, "no tiene ningún pago definido")
+		}
+		if b.Total%100 != 0 {
+			add(IssueError, w, "el precio total %s debe ser un valor en euros enteros (sin céntimos)", FormatEUR(b.Total))
 		}
 		if len(b.Pagos) > MaxPagos {
 			add(IssueError, w, "tiene %d pagos y el máximo es %d", len(b.Pagos), MaxPagos)
@@ -257,6 +264,8 @@ func (c MasterConfig) Validate() []Issue {
 		for i, p := range b.Pagos {
 			if p <= 0 {
 				add(IssueError, w, "el pago #%d debe ser mayor que cero", i+1)
+			} else if p%100 != 0 {
+				add(IssueError, w, "el pago #%d (%s) debe ser un valor en euros enteros (sin céntimos)", i+1, FormatEUR(p))
 			}
 			sum += p
 		}
@@ -317,8 +326,9 @@ func (c MasterConfig) Validate() []Issue {
 	for i, a := range c.Categorias {
 		for _, b := range c.Categorias[i+1:] {
 			lo, hi := max(a.Anios.Min, b.Anios.Min), min(a.Anios.Max, b.Anios.Max)
-			if lo <= hi {
-				add(IssueError, "Categorías", "los años %s están en dos categorías (%s y %s); cada año debe tener una sola",
+			// Dos filas con la misma plantilla (p. ej. JUVENIL y CADETE) no son ambiguas.
+			if lo <= hi && (a.Plantilla != b.Plantilla || a.Plantilla == "") {
+				add(IssueError, "Categorías", "El año %s está en dos plantillas distintas (%s y %s); cada año debe tener una sola.",
 					YearRange{lo, hi}, a.Nombre, b.Nombre)
 			}
 		}
@@ -344,6 +354,15 @@ func BecaLabel(k BecaKey) string {
 		return "ACOMPAÑANTE"
 	}
 	return string(k) + "%"
+}
+
+func contieneBeca(l []BecaKey, k BecaKey) bool {
+	for _, x := range l {
+		if x == k {
+			return true
+		}
+	}
+	return false
 }
 
 func abs(m Money) Money {

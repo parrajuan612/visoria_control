@@ -17,17 +17,16 @@ type ValidationOptions struct {
 	RequireBothChannels bool
 }
 
-// Campos de los hallazgos (coinciden con las columnas del Excel).
+// Campos de los hallazgos: los mismos nombres de columna del Excel del cliente.
 const (
-	CampoJugador   = "Jugador"
-	CampoClub      = "Club"
-	CampoAcudiente = "Acudiente"
-	CampoBeca      = "Beca"
-	CampoAnio      = "Año de nacimiento"
-	CampoMovil     = "Móvil"
-	CampoCorreo    = "Correo"
-	CampoCanales   = "Canales"
-	CampoDuplicado = "Duplicado"
+	CampoJugador   = "NOMBRE DEL JUGADOR"
+	CampoClub      = "CLUB"
+	CampoAcudiente = "NOMBRE DEL ACUDIENTE"
+	CampoBeca      = "BECA"
+	CampoAnio      = "AÑO DE NACIMIENTO"
+	CampoMovil     = "MOVIL"
+	CampoCorreo    = "CORREO ELECTRONICO"
+	CampoCanales   = "Canales de envío"
 	CampoTorneo    = "Torneo"
 	CampoCategoria = "Categoría"
 )
@@ -41,7 +40,7 @@ var (
 	reAnioEnDate = regexp.MustCompile(`(?:^|[^0-9])((?:19|20)\d{2})(?:[^0-9]|$)`)
 	reNumero     = regexp.MustCompile(`^\d+([.,]\d+)?$`)
 	reCientifica = regexp.MustCompile(`^\d+([.,]\d+)?[eE][+-]?\d+$`)
-	reEmail      = regexp.MustCompile(`^[A-Za-z0-9._%+'\-]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$`)
+	reEmail      = regexp.MustCompile(`^[^@\s,;<>()\[\]\\\"]+@[A-Za-z0-9\-]+(\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}$`)
 )
 
 // cleanNumber convierte lo que Excel guarda para un número ("3.2093234E9", "3209323449.0")
@@ -65,47 +64,67 @@ func ParseBirthYear(s string) (year int, warn string, err error) {
 	t := cleanNumber(s)
 	switch {
 	case t == "":
-		return 0, "", fmt.Errorf("falta el año de nacimiento")
+		return 0, "", fmt.Errorf("La casilla está vacía.")
 	case reAnio4.MatchString(t):
 		year, _ = strconv.Atoi(t)
 	case reNumero.MatchString(t) && !strings.ContainsAny(t, ".,"):
 		// Número de serie de una fecha de Excel (días desde 1899-12-30).
 		n, _ := strconv.Atoi(t)
 		if n < 10000 || n > 80000 {
-			return 0, "", fmt.Errorf("el año de nacimiento «%s» no es válido (use solo el año, ej. 2010)", t)
+			return 0, "", fmt.Errorf("«%s» no es un año válido (escriba solo el año, ej. 2010).", t)
 		}
 		year = time.Date(1899, 12, 30, 0, 0, 0, 0, time.UTC).AddDate(0, 0, n).Year()
 		warn = fmt.Sprintf("la celda trae una fecha y no solo el año; se tomó %d (escriba solo el año, ej. 2010)", year)
 	default:
 		m := reAnioEnDate.FindStringSubmatch(t)
 		if m == nil || reNumero.MatchString(t) { // un decimal suelto ("2010.5") no es una fecha
-			return 0, "", fmt.Errorf("el año de nacimiento «%s» no es válido (use solo el año, ej. 2010)", t)
+			return 0, "", fmt.Errorf("«%s» no es un año válido (escriba solo el año, ej. 2010).", t)
 		}
 		year, _ = strconv.Atoi(m[1])
 		warn = fmt.Sprintf("la celda trae «%s» y no solo el año; se tomó %d (escriba solo el año, ej. 2010)", t, year)
 	}
 	if year < MinBirthYear || year > MaxBirthYear {
-		return 0, "", fmt.Errorf("el año de nacimiento %d no es plausible (se esperaba entre %d y %d)", year, MinBirthYear, MaxBirthYear)
+		return 0, "", fmt.Errorf("«%d» no es un año válido (se esperaba entre %d y %d).", year, MinBirthYear, MaxBirthYear)
 	}
 	return year, warn, nil
 }
 
-// ParseBecaCell interpreta la celda de beca: "50%", "50", "0,5", "SIN BECA", "ACOMPAÑANTE".
+var reDigitos = regexp.MustCompile(`\d+`)
+
+// ParseBecaCell interpreta la celda de beca como lo hace el sistema del cliente:
+// "50", "50%", "Beca 70", 0,3 (celda con formato %), 1 (= 100 %), y "Sin beca"/"ninguna"/"no"/"0".
+// Los errores usan los textos del cliente; el llamador agrega la lista de valores válidos.
 func ParseBecaCell(s string) (BecaKey, error) {
 	t := cleanNumber(s)
 	if t == "" {
-		return "", fmt.Errorf("falta la beca")
+		return "", fmt.Errorf("La casilla BECA está vacía.")
 	}
-	// Excel guarda 50 % como 0,5: se convierte a porcentaje.
+	switch NormalizeText(t) {
+	case "SIN BECA", "NINGUNA", "NO", "0":
+		return BecaSinBeca, nil
+	}
+	// Excel guarda 50 % como 0,5 y 100 % como 1.
 	if reNumero.MatchString(t) {
-		if f, err := strconv.ParseFloat(strings.Replace(t, ",", ".", 1), 64); err == nil && f > 0 && f < 1 {
-			t = strconv.Itoa(int(math.Round(f * 100)))
+		if f, err := strconv.ParseFloat(strings.Replace(t, ",", ".", 1), 64); err == nil {
+			switch {
+			case f > 0 && f < 1:
+				t = strconv.Itoa(int(math.Round(f * 100)))
+			case f == 1:
+				t = "100"
+			}
 		}
 	}
 	if k, ok := NormalizeBecaKey(t); ok {
 		return k, nil
 	}
-	return "", fmt.Errorf("la beca «%s» no es válida", strings.TrimSpace(s))
+	// "Beca 70": se toma el primer número del texto.
+	if m := reDigitos.FindString(NormalizeText(t)); m != "" {
+		if v, _ := strconv.Atoi(m); v >= 1 && v <= 100 {
+			return BecaKey(strconv.Itoa(v)), nil
+		}
+		return "", fmt.Errorf("BECA «%s» no es válida", strings.TrimSpace(s))
+	}
+	return "", fmt.Errorf("BECA «%s» no es un número válido", strings.TrimSpace(s))
 }
 
 // NormalizePhone devuelve el móvil en formato E.164 sin "+": 57XXXXXXXXXX.
@@ -125,7 +144,7 @@ func NormalizePhone(s string) (string, error) {
 			digits.WriteRune(r)
 		case unicode.IsSpace(r), strings.ContainsRune("+-().", r):
 		default:
-			return "", fmt.Errorf("MOVIL «%s» contiene caracteres no válidos", raw)
+			return "", fmt.Errorf("MOVIL «%s» contiene caracteres no válidos.", raw)
 		}
 	}
 	d := digits.String()
@@ -134,26 +153,26 @@ func NormalizePhone(s string) (string, error) {
 	}
 	switch {
 	case d == "":
-		return "", fmt.Errorf("MOVIL «%s» no tiene dígitos", raw)
+		return "", fmt.Errorf("MOVIL «%s» no tiene dígitos.", raw)
 	case !intl && len(d) == 10:
 		if d[0] != '3' {
-			return "", fmt.Errorf("MOVIL «%s» no es un móvil colombiano (debe empezar por 3)", raw)
+			return "", fmt.Errorf("MOVIL «%s» no es un móvil colombiano (debe empezar por 3).", raw)
 		}
 		return "57" + d, nil
 	case strings.HasPrefix(d, "57"): // el 57 es solo de Colombia: 57 + 10 dígitos que empiezan por 3
 		if len(d) != 12 {
-			return "", fmt.Errorf("MOVIL «%s» está incompleto (57 + 10 dígitos)", raw)
+			return "", fmt.Errorf("MOVIL «%s» está incompleto.", raw)
 		}
 		if d[2] != '3' {
-			return "", fmt.Errorf("MOVIL «%s» no es un móvil colombiano (después del 57 debe empezar por 3)", raw)
+			return "", fmt.Errorf("MOVIL «%s» no es un móvil colombiano (después del 57 debe empezar por 3).", raw)
 		}
 		return d, nil
 	case intl && len(d) >= 8 && len(d) <= 15:
 		return d, nil // internacional (E.164: hasta 15 dígitos)
 	case len(d) < 10:
-		return "", fmt.Errorf("MOVIL «%s» está incompleto (10 dígitos)", raw)
+		return "", fmt.Errorf("MOVIL «%s» está incompleto.", raw)
 	default:
-		return "", fmt.Errorf("MOVIL «%s» no tiene un largo válido (10 dígitos, o 57 + 10 dígitos)", raw)
+		return "", fmt.Errorf("MOVIL «%s» no tiene un largo válido (10 dígitos, o 57 + 10 dígitos).", raw)
 	}
 }
 
@@ -196,8 +215,9 @@ func ParseEmails(s string) (valid, invalid []string) {
 func squash(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // ValidateRow valida y normaliza una fila contra la configuración vigente.
-// Reglas (D3 y SDD §3.9): jugador, club, acudiente, beca y año son obligatorios (error);
-// "SIN BECA" omite la fila; la fila es válida con al menos un canal válido (móvil o correo).
+// Reglas del sistema del cliente (excel_reader.py) y D3: jugador, club, acudiente, beca y año
+// son obligatorios; "SIN BECA" omite la fila SIN reportar ningún otro problema; la fila es válida
+// con al menos un canal válido (móvil o correo).
 func ValidateRow(raw RawRow, cfg MasterConfig, opt ValidationOptions) Recipient {
 	r := Recipient{
 		Fila: raw.Fila, Jugador: squash(raw.Jugador), Club: squash(raw.Club), Acudiente: squash(raw.Acudiente),
@@ -207,27 +227,33 @@ func ValidateRow(raw RawRow, cfg MasterConfig, opt ValidationOptions) Recipient 
 		r.Issues = append(r.Issues, Issue{Nivel: n, Campo: campo, Mensaje: fmt.Sprintf(msg, a...)})
 	}
 
-	// --- Obligatorios de texto ---
-	for _, f := range []struct{ val, campo string }{{r.Jugador, CampoJugador}, {r.Club, CampoClub}, {r.Acudiente, CampoAcudiente}} {
-		if f.val == "" {
-			add(IssueError, f.campo, "falta el dato (es obligatorio)")
+	// --- Beca (primero: SIN BECA anula el resto de la validación) ---
+	key, err := ParseBecaCell(raw.Beca)
+	switch {
+	case err != nil:
+		msg := err.Error()
+		if !strings.HasPrefix(msg, "La casilla") {
+			msg += " (debe ser " + becasValidas(cfg) + ")."
+		}
+		add(IssueError, CampoBeca, "%s", msg)
+	case key == BecaSinBeca:
+		// No recibe propuesta: lo demás de la fila no importa y no se reporta (como en el cliente).
+		r.Beca = BecaSinBeca
+		r.Issues = []Issue{{Nivel: IssueInfo, Campo: CampoBeca, Mensaje: "SIN BECA: no se genera propuesta para esta fila."}}
+		r.Estado = RecipientOmitted
+		return r
+	default:
+		r.Beca = key
+		if _, ok := cfg.Beca(key); !ok {
+			add(IssueError, CampoBeca, "BECA «%s» no es válida (debe ser %s).", strings.TrimSpace(raw.Beca), becasValidas(cfg))
 		}
 	}
 
-	// --- Beca ---
-	key, err := ParseBecaCell(raw.Beca)
-	if err != nil {
-		add(IssueError, CampoBeca, "%v", err)
-	} else {
-		r.Beca = key
-		if _, ok := cfg.Beca(key); !ok && key != BecaSinBeca {
-			add(IssueError, CampoBeca, "la beca «%s» no existe en la configuración de Google Sheets", BecaLabel(key))
+	// --- Obligatorios de texto ---
+	for _, f := range []struct{ val, campo string }{{r.Jugador, CampoJugador}, {r.Club, CampoClub}, {r.Acudiente, CampoAcudiente}} {
+		if f.val == "" {
+			add(IssueError, f.campo, "La casilla está vacía.")
 		}
-	}
-	if r.Beca == BecaSinBeca && !HasErrors(r.Issues) {
-		add(IssueInfo, CampoBeca, "SIN BECA: no se genera propuesta para esta fila")
-		r.Estado = RecipientOmitted
-		return r
 	}
 
 	// --- Año → categoría, plantilla y torneos ---
@@ -240,7 +266,7 @@ func ValidateRow(raw RawRow, cfg MasterConfig, opt ValidationOptions) Recipient 
 			add(IssueWarning, CampoAnio, "%s", warn)
 		}
 		if cats := cfg.CategoriasParaAnio(year); len(cats) == 0 {
-			add(IssueError, CampoCategoria, "no hay una categoría configurada para el año %d", year)
+			add(IssueError, CampoCategoria, "El año %d no pertenece a ninguna categoría del programa.", year)
 		} else {
 			r.Categoria, r.Plantilla = cats[0].Nombre, cats[0].Plantilla
 			if r.Plantilla == "" {
@@ -265,6 +291,21 @@ func ValidateRow(raw RawRow, cfg MasterConfig, opt ValidationOptions) Recipient 
 	return r
 }
 
+// becasValidas lista las becas con propuesta de la configuración: "30, 50, 70, 100 o SIN BECA".
+func becasValidas(cfg MasterConfig) string {
+	var names []string
+	for _, b := range cfg.Becas {
+		if b.Clave != BecaSinBeca {
+			names = append(names, strings.TrimSuffix(BecaLabel(b.Clave), "%"))
+		}
+	}
+	names = append(names, "SIN BECA")
+	if len(names) == 1 {
+		return names[0]
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " o " + names[len(names)-1]
+}
+
 func validateChannels(r *Recipient, raw RawRow, opt ValidationOptions, add func(IssueLevel, string, string, ...any)) {
 	// Móvil
 	var movilProblem string
@@ -282,7 +323,7 @@ func validateChannels(r *Recipient, raw RawRow, opt ValidationOptions, add func(
 	if strings.TrimSpace(raw.Correo) == "" {
 		correoProblem = "no tiene correo"
 	} else if len(valid) == 0 {
-		correoProblem = fmt.Sprintf("el correo «%s» no es válido", strings.Join(invalid, " "))
+		correoProblem = fmt.Sprintf("CORREO «%s» no es un correo válido", strings.Join(invalid, ", "))
 	}
 	for _, e := range valid { // errores de digitación frecuentes en el dominio
 		if at := strings.LastIndex(e, "@"); at > 0 {
@@ -292,7 +333,7 @@ func validateChannels(r *Recipient, raw RawRow, opt ValidationOptions, add func(
 		}
 	}
 	if len(valid) > 0 && len(invalid) > 0 {
-		add(IssueWarning, CampoCorreo, "se ignora el correo no válido «%s»", strings.Join(invalid, " "))
+		add(IssueWarning, CampoCorreo, "CORREO «%s» no es un correo válido; se ignora", strings.Join(invalid, ", "))
 	}
 
 	waOK, emOK := r.Movil != "", len(r.Correos) > 0
@@ -318,8 +359,8 @@ func validateChannels(r *Recipient, raw RawRow, opt ValidationOptions, add func(
 	}
 }
 
-// ValidateBatch valida todas las filas y marca los duplicados (mismo jugador y año de nacimiento):
-// la primera aparición queda como está y las siguientes pasan a error para no enviar dos veces.
+// ValidateBatch valida todas las filas y avisa de los duplicados (mismo jugador y año de nacimiento):
+// las apariciones posteriores a la primera llevan una advertencia, igual que en el sistema del cliente.
 func ValidateBatch(rows []RawRow, cfg MasterConfig, opt ValidationOptions) []Recipient {
 	out := make([]Recipient, len(rows))
 	first := map[string]int{} // clave → fila de la primera aparición
@@ -328,9 +369,9 @@ func ValidateBatch(rows []RawRow, cfg MasterConfig, opt ValidationOptions) []Rec
 		if r.Jugador != "" && r.Anio != 0 && r.Estado != RecipientOmitted {
 			key := NormalizeText(r.Jugador) + "|" + strconv.Itoa(r.Anio)
 			if prev, dup := first[key]; dup {
-				r.Issues = append(r.Issues, Issue{Nivel: IssueError, Campo: CampoDuplicado,
-					Mensaje: fmt.Sprintf("«%s» (%d) ya aparece en la fila %d", r.Jugador, r.Anio, prev)})
-				r.Estado = RecipientInvalid
+				// Como en el sistema del cliente: se genera igual, pero se avisa.
+				r.Issues = append(r.Issues, Issue{Nivel: IssueWarning, Campo: CampoJugador,
+					Mensaje: fmt.Sprintf("Este jugador también aparece en la fila %d.", prev)})
 			} else {
 				first[key] = r.Fila
 			}

@@ -56,12 +56,16 @@ func (f *fakeApplier) GetTournamentForPlayer(context.Context, int, string) (doma
 }
 
 func validCfg() domain.MasterConfig {
+	eur := func(n int64) domain.Money { return domain.Money(n * 100) } // importes en euros enteros
 	beca := func(n string, total domain.Money, p ...domain.Money) domain.Beca {
 		k, _ := domain.NormalizeBecaKey(n)
 		return domain.Beca{Clave: k, Nombre: n, Total: total, Pagos: p}
 	}
 	return domain.MasterConfig{
-		Becas:      []domain.Beca{beca("SIN BECA", 300, 100, 200), beca("30%", 200, 200), beca("50%", 100, 100), beca("70%", 50, 50), beca("100%", 10, 10)},
+		Becas: []domain.Beca{
+			beca("SIN BECA", eur(300), eur(100), eur(200)), beca("30%", eur(200), eur(200)), beca("50%", eur(100), eur(100)),
+			beca("70%", eur(50), eur(50)), beca("100%", eur(10), eur(10)), beca("ACOMPAÑANTE", eur(180), eur(180)),
+		},
 		Torneos:    []domain.TorneoRango{{Anios: domain.YearRange{Min: 2010, Max: 2012}, Nombre: "T"}},
 		Categorias: []domain.CategoriaRango{{Anios: domain.YearRange{Min: 2010, Max: 2012}, Nombre: "CADETE", Plantilla: "cadete_juvenil"}},
 	}
@@ -90,7 +94,7 @@ func TestSyncValidaReemplazaYGuardaURL(t *testing.T) {
 	if len(ap.applied) != 1 || st.snap == nil || st.url != gURL || src.calls[0] != gURL {
 		t.Errorf("applied=%d snap=%v url=%q calls=%v", len(ap.applied), st.snap != nil, st.url, src.calls)
 	}
-	if res.Summary.Becas != 5 || !res.SyncedAt.Equal(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)) {
+	if res.Summary.Becas != 6 || !res.SyncedAt.Equal(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)) {
 		t.Errorf("resumen: %+v", res)
 	}
 	// Segunda sincronización sin cambios: aplica pero Changed=false; sin URL nueva usa la guardada.
@@ -99,7 +103,7 @@ func TestSyncValidaReemplazaYGuardaURL(t *testing.T) {
 		t.Errorf("2ª: res=%+v err=%v calls=%v", res, err, src.calls)
 	}
 	// Si la hoja cambia, Changed=true.
-	src.cfg.Becas[0].Total, src.cfg.Becas[0].Pagos = 400, []domain.Money{400}
+	src.cfg.Becas[0].Total, src.cfg.Becas[0].Pagos = 40000, []domain.Money{40000}
 	if res, _ = svc.Sync(context.Background(), ""); !res.Changed {
 		t.Error("debía detectar el cambio")
 	}
@@ -108,7 +112,7 @@ func TestSyncValidaReemplazaYGuardaURL(t *testing.T) {
 func TestSyncInvalidaConservaLaVigente(t *testing.T) {
 	prev := &domain.ConfigSnapshot{Config: validCfg(), Hash: "viejo"}
 	bad := validCfg()
-	bad.Becas[1].Total = 999 // los pagos ya no suman
+	bad.Becas[1].Total = 99900 // los pagos ya no suman
 	src, st, ap := &fakeSource{cfg: bad}, &fakeStore{snap: prev, url: "https://docs.google.com/spreadsheets/guardada"}, &fakeApplier{}
 	res, err := newSvc(src, st, ap, "").Sync(context.Background(), gURL)
 	if err != nil {
@@ -191,7 +195,7 @@ func TestRestore(t *testing.T) {
 	}
 	// La hoja existe pero es inválida → se informa.
 	bad := validCfg()
-	bad.Becas[1].Total = 1
+	bad.Becas[1].Total = 100
 	if err := newSvc(&fakeSource{cfg: bad}, &fakeStore{}, &fakeApplier{}, gURL).Restore(ctx); err == nil {
 		t.Error("una hoja inválida debe informarse")
 	}

@@ -146,7 +146,10 @@ func TestValidateErroresDeBecas(t *testing.T) {
 		{"duplicada", func(c *MasterConfig) { c.Becas = append(c.Becas, c.Becas[1]) }, "está repetida"},
 		{"falta requerida", func(c *MasterConfig) { c.Becas = c.Becas[:1] }, `falta la beca "30%"`},
 		{"total cero", func(c *MasterConfig) { c.Becas[0].Total = 0 }, "mayor que cero"},
-		{"sin pagos", func(c *MasterConfig) { c.Becas[0].Pagos = nil }, "ningún pago"},
+		{"sin pagos (beca con propuesta)", func(c *MasterConfig) { c.Becas[1].Pagos = nil }, "ningún pago"},
+		{"pago con céntimos", func(c *MasterConfig) { c.Becas[0].Pagos = []Money{93050, 93050, 93900} }, "euros enteros"},
+		{"precio con céntimos", func(c *MasterConfig) { c.Becas[0].Total = 280050; c.Becas[0].Pagos = []Money{280050} }, "euros enteros"},
+		{"falta ACOMPAÑANTE", func(c *MasterConfig) { c.Becas = c.Becas[:5] }, `falta la beca "ACOMPAÑANTE"`},
 		{"demasiados pagos", func(c *MasterConfig) { c.Becas[0].Pagos = []Money{1, 1, 1, 1} }, "máximo es 3"},
 		{"pago cero", func(c *MasterConfig) { c.Becas[0].Pagos = []Money{280000, 0} }, "pago #2"},
 		{"sin becas", func(c *MasterConfig) { c.Becas = nil }, "ninguna beca"},
@@ -175,7 +178,7 @@ func TestValidateErroresDeAnios(t *testing.T) {
 		f    func(*MasterConfig)
 		sub  string
 	}{
-		{"categorías solapadas", IssueError, func(c *MasterConfig) { c.Categorias[1].Anios = YearRange{2010, 2012} }, "2010 están en dos categorías"},
+		{"categorías solapadas", IssueError, func(c *MasterConfig) { c.Categorias[1].Anios = YearRange{2012, 2013} }, "El año 2013 está en dos plantillas distintas (CADETE y INFANTIL)"},
 		{"año fuera de rango (torneo)", IssueError, func(c *MasterConfig) { c.Torneos[0].Anios = YearRange{1850, 2014} }, "fuera del rango plausible"},
 		{"año fuera de rango (categoría)", IssueError, func(c *MasterConfig) { c.Categorias[0].Anios = YearRange{2008, 2090} }, "fuera del rango plausible"},
 		{"torneo sin nombre", IssueError, func(c *MasterConfig) { c.Torneos[0].Nombre = "" }, "no tiene nombre"},
@@ -249,4 +252,23 @@ func TestHelpersDeAnios(t *testing.T) {
 	c := configValida()
 	c.Torneos = append(c.Torneos, TorneoRango{Anios: YearRange{0, 99999999}, Nombre: "X"})
 	_ = c.Validate()
+}
+
+// SIN BECA no recibe propuesta: no necesita plan de pagos (como config.validar del cliente).
+func TestSinBecaYAcompananteNoRequierenPlan(t *testing.T) {
+	c := configValida()
+	c.Becas[0].Pagos = nil // SIN BECA
+	c.Becas[5].Pagos = nil // ACOMPAÑANTE
+	if HasErrors(c.Validate()) {
+		t.Errorf("sin plan en SIN BECA/ACOMPAÑANTE no debe ser error: %+v", c.Validate())
+	}
+}
+
+// Dos filas con la MISMA plantilla (JUVENIL y CADETE → cadete_juvenil) pueden solaparse.
+func TestSolapeConMismaPlantillaNoEsError(t *testing.T) {
+	c := configValida()
+	c.Categorias[1].Anios = YearRange{2010, 2012} // solapa con JUVENIL 2008-2010, misma plantilla
+	if HasErrors(c.Validate()) {
+		t.Errorf("la misma plantilla no es ambigua: %+v", c.Validate())
+	}
 }
