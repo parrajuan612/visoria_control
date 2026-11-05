@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 
 	"visoria-control/internal/core/ports"
 )
@@ -14,19 +13,20 @@ import (
 type whatsappAPI struct {
 	accessToken   string
 	phoneNumberID string // ¡OJO! Este es el Phone Number ID, no el WABA ID
+	apiVersion    string
 }
 
-func NewWhatsAppAPI() ports.WhatsAppAPI {
-	// Asegúrate de tener estas variables en tu archivo .env
+func NewWhatsAppAPI(accessToken, phoneNumberID, apiVersion string) ports.WhatsAppAPI {
 	return &whatsappAPI{
-		accessToken:   os.Getenv("WHATSAPP_TOKEN"),
-		phoneNumberID: os.Getenv("WHATSAPP_PHONE_ID"),
+		accessToken:   accessToken,
+		phoneNumberID: phoneNumberID,
+		apiVersion:    apiVersion,
 	}
 }
 
 func (w *whatsappAPI) SendTemplate(ctx context.Context, phone string, templateName string, language string, components []interface{}) error {
 
-	url := fmt.Sprintf("https://graph.facebook.com/v19.0/%s/messages", w.phoneNumberID)
+	url := fmt.Sprintf("https://graph.facebook.com/%s/%s/messages", w.apiVersion, w.phoneNumberID)
 
 	// Estructura oficial de Meta para enviar plantillas
 	payload := map[string]interface{}{

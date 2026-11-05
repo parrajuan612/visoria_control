@@ -1,23 +1,24 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"os"
 
+	"visoria-control/internal/platform/config"
+
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 )
 
-func init() {
-	if os.Getenv("APP_ENV") != "production" {
-		err := godotenv.Load(".env")
-		if err != nil {
-			log.Println("No se pudo cargar el archivo .env, usando variables del sistema")
-		}
-	}
-}
-
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("no se pudo iniciar", "error", err)
+		os.Exit(1)
+	}
+	if cfg.Env == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	r := gin.Default()
-	InitServer(r) // Como ya están en el mismo paquete, se pueden llamar directamente
+	InitServer(r, cfg)
 }

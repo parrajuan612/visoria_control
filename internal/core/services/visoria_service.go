@@ -19,17 +19,30 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
+// Options agrupa los valores de configuración que necesita el servicio
+// (los provee platform/config; el servicio no lee el entorno).
+type Options struct {
+	BaseURL         string
+	ChatwootURL     string
+	ChatwootToken   string
+	ChatwootAccount string
+	ChatwootInbox   int
+	WhatsAppPause   time.Duration
+}
+
 type visoriaService struct {
 	repo   ports.TournamentRepository
 	pdfGen ports.PDFGenerator
 	waAPI  ports.WhatsAppAPI
+	opts   Options
 }
 
-func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, waAPI ports.WhatsAppAPI) ports.VisoriaService {
+func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, waAPI ports.WhatsAppAPI, opts Options) ports.VisoriaService {
 	return &visoriaService{
 		repo:   repo,
 		pdfGen: pdfGen,
 		waAPI:  waAPI,
+		opts:   opts,
 	}
 }
 
@@ -181,12 +194,7 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 		becaNum := strings.ReplaceAll(p.Scholarship, "%", "")
 
 		nombreSeguro := strings.ReplaceAll(p.Name, " ", "_")
-		baseURL := os.Getenv("BASE_URL")
-		if baseURL == "" {
-			baseURL = "https://chatmajestic.duckdns.org"
-		}
-
-		pdfURL := fmt.Sprintf("%s/pdfs/%s_%s.pdf", baseURL, nombreSeguro, p.FileID)
+		pdfURL := fmt.Sprintf("%s/pdfs/%s_%s.pdf", s.opts.BaseURL, nombreSeguro, p.FileID)
 
 		components := []interface{}{
 			map[string]interface{}{
@@ -233,7 +241,7 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 			}
 		}
 
-		time.Sleep(6 * time.Second)
+		time.Sleep(s.opts.WhatsAppPause)
 	}
 
 	return nil
@@ -241,26 +249,10 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 
 // registrarEnChatwoot busca o crea el contacto, asegura una conversación activa y registra el mensaje saliente
 func (s *visoriaService) registrarEnChatwoot(phone string, playerName string, messageContent string) error {
-	chatwootURL := os.Getenv("CHATWOOT_URL")
-	if chatwootURL == "" {
-		chatwootURL = "http://127.0.0.1:3000"
-	}
-
-	apiToken := os.Getenv("CHATWOOT_API_TOKEN")
-	if apiToken == "" {
-		return fmt.Errorf("CHATWOOT_API_TOKEN no está definido en las variables de entorno")
-	}
-
-	accountID := os.Getenv("CHATWOOT_ACCOUNT_ID")
-	if accountID == "" {
-		accountID = "1"
-	}
-
-	inboxIDStr := os.Getenv("CHATWOOT_INBOX_ID")
-	if inboxIDStr == "" {
-		inboxIDStr = "2"
-	}
-	inboxID, _ := strconv.Atoi(inboxIDStr)
+	chatwootURL := s.opts.ChatwootURL
+	apiToken := s.opts.ChatwootToken
+	accountID := s.opts.ChatwootAccount
+	inboxID := s.opts.ChatwootInbox
 
 	client := &http.Client{Timeout: 10 * time.Second}
 
