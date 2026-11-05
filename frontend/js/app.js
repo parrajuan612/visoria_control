@@ -12,6 +12,12 @@ window.addEventListener('load', () => {
 // Navegación entre pasos
 async function goToStep(step) {
     if (step === 2) {
+        // El torneo de origen es obligatorio (va en el encabezado de cada propuesta).
+        if (!document.getElementById('torneo').value.trim()) {
+            alert("Escribe el nombre del torneo donde se becó a los jugadores.");
+            document.getElementById('torneo').focus();
+            return;
+        }
         // Antes de pasar al paso 2, cargamos la configuración maestra
         const btn = document.querySelector('#step1 button');
         const originalText = btn.innerHTML;
@@ -53,6 +59,8 @@ async function goToStep(step) {
         btn.disabled = false;
     }
 
+    if (step === 3 && !(await prepareStep3())) return;
+
     document.getElementById('step1').classList.replace('step-active', 'step-hidden');
     document.getElementById('step2').classList.replace('step-active', 'step-hidden');
     document.getElementById('step3').classList.replace('step-active', 'step-hidden');
@@ -63,20 +71,31 @@ async function goToStep(step) {
 // Variable global para guardar los niños mientras avanzamos por los pasos
 window.currentPlayers = [];
 
-// Escuchar cuando el usuario arrastra/selecciona el Excel
+// Fechas de pago de las casillas del paso 1 (el servidor valida orden y huecos).
+function paymentDateFields() {
+    return {
+        fecha_pago_1: document.getElementById('date1').value,
+        fecha_pago_2: document.getElementById('date2').value,
+        fecha_pago_3: document.getElementById('date3').value,
+    };
+}
+
+// Escuchar cuando el usuario arrastra/selecciona el Excel: se crea una campaña (borrador validado).
 document.getElementById('excelUpload').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     try {
-        console.log("Subiendo archivo...");
-        const data = await uploadPlayersExcel(file);
+        const result = await createCampaign(file, {
+            torneo: document.getElementById('torneo').value,
+            requerir_ambos: document.getElementById('requireBoth').checked ? 'true' : 'false',
+            ...paymentDateFields(),
+        });
+        if (!result.ok) throw new Error(result.data.error || 'No se pudo procesar el archivo.');
 
-        // Guardamos los jugadores procesados
-        window.currentPlayers = data.data;
-
-        renderValidationSummary(data.resumen);
-        renderValidationTable(window.currentPlayers);
+        window.currentCampaign = result.data.campaign;
+        window.currentPlayers = [];
+        campaignView.show(result.data);
     } catch (error) {
         alert("Error: " + error.message);
     } finally {
@@ -84,64 +103,31 @@ document.getElementById('excelUpload').addEventListener('change', async (e) => {
     }
 });
 
-// Crea un nodo con texto (nunca innerHTML: los datos vienen de un Excel editable por terceros).
-function node(tag, className, text) {
-    const n = document.createElement(tag);
-    if (className) n.className = className;
-    if (text !== undefined) n.textContent = text;
-    return n;
-}
-
-function renderValidationSummary(r) {
-    const box = document.getElementById('validationSummary');
-    box.classList.remove('hidden');
-    if (!r) { box.classList.add('hidden'); return; }
-    box.replaceChildren(
-        node('span', 'text-green-700 mr-4', `${r.validas} listas`),
-        node('span', 'text-red-700 mr-4', `${r.con_errores} con errores`),
-        node('span', 'text-gray-500 mr-4', `${r.omitidas} sin beca (se omiten)`),
-        node('span', 'text-amber-700', `${r.con_advertencias} con advertencias`));
-}
-
-const ISSUE_STYLE = { 'error': 'text-red-600', 'advertencia': 'text-amber-600', 'info': 'text-gray-500' };
-
-// Dibuja la tabla de validación: una fila por jugador con su estado y los hallazgos.
-function renderValidationTable(players) {
-    const tableContainer = document.getElementById('validationTable');
-    tableContainer.classList.remove('hidden');
-
-    const table = node('table', 'w-full text-left bg-white rounded shadow text-sm');
-    const head = node('tr');
-    ['Jugador', 'Torneo Asignado', 'Estado'].forEach(h => head.append(node('th', 'p-2', h)));
-    const thead = node('thead', 'bg-gray-100 text-gray-600');
-    thead.append(head);
-    table.append(thead);
-    const tbody = node('tbody');
-
-    players.forEach(p => {
-        const isOk = p.Status === 'PENDING';
-        let statusText = 'Ok', statusClass = 'text-green-500';
-        if (p.Status === 'OMITTED') { statusText = 'Sin beca (se omite)'; statusClass = 'text-gray-500'; }
-        if (p.Status === 'INVALID_DATA') { statusText = 'Faltan Datos'; statusClass = 'text-red-500'; }
-        if (p.Status === 'INVALID_MATCH') { statusText = 'Error Beca/Año'; statusClass = 'text-red-500'; }
-
-        const tr = node('tr', `border-b ${isOk || p.Status === 'OMITTED' ? 'hover:bg-gray-50' : 'bg-red-50'}`);
-        const name = node('td', 'p-2 align-top');
-        name.append(node('div', 'font-medium', p.Name));
-        // Hallazgos (errores primero) debajo del nombre.
-        (p.Issues || []).filter(i => i.nivel !== 'info').sort((a, b) => (a.nivel === 'error' ? 0 : 1) - (b.nivel === 'error' ? 0 : 1))
-            .forEach(i => name.append(node('div', `text-xs ${ISSUE_STYLE[i.nivel] || ''}`, `${i.campo}: ${i.mensaje}`)));
-
-        const torneo = node('td', 'p-2 text-xs text-gray-500 align-top');
-        if (p.Tournament && p.Tournament.Name) torneo.textContent = p.Tournament.Name;
-        else torneo.append(node('span', 'text-red-500 font-bold', 'Sin Torneo'));
-
-        tr.append(name, torneo, node('td', `p-2 font-bold align-top ${statusClass}`, statusText));
-        tbody.append(tr);
-    });
-
-    table.append(tbody);
-    tableContainer.replaceChildren(table);
+// Antes del paso 3: confirma lo que no se enviará y trae los destinatarios VIGENTES del servidor
+// (con las correcciones hechas en la tabla) en el formato del flujo de envío actual.
+async function prepareStep3() {
+    const campaign = window.currentCampaign;
+    if (!campaign) {
+        alert("Primero sube el Excel de jugadores.");
+        return false;
+    }
+    const r = campaignView.current().resumen;
+    if (r.con_errores > 0) {
+        const sigue = confirm(`${r.con_errores} fila(s) tienen errores y NO se enviarán hasta corregirlas.\n` +
+            `Se procesarán ${r.validas} fila(s) válidas.\n\n¿Continuar de todas formas?`);
+        if (!sigue) return false;
+    }
+    if (r.validas === 0) {
+        alert("No hay filas válidas para enviar.");
+        return false;
+    }
+    const players = await getCampaignPlayers(campaign.id);
+    if (!players.ok) {
+        alert("No se pudo preparar el envío: " + (players.data.error || "error del servidor"));
+        return false;
+    }
+    window.currentPlayers = players.data.data;
+    return true;
 }
 
 // En js/app.js
@@ -213,21 +199,18 @@ async function startMassiveProcess() {
     };
 
     try {
-        const lugarVisoria = document.getElementById('visoria').value || "Sede Majestic Intercambio";
-        
-        const formatPdfDate = (dateStr) => {
-            if (!dateStr) return "";
-            const [year, month, day] = dateStr.split('-');
+        // Torneo y fechas de pago: son los de la campaña (validados por el servidor), no los de la casilla.
+        const campaign = window.currentCampaign;
+        const formatPdfDate = (iso) => {
+            if (!iso) return "";
+            const [year, month, day] = iso.split('-');
             return `${day}/${month}/${year}`;
         };
+        const [d1, d2, d3] = [0, 1, 2].map(i => formatPdfDate((campaign.fechas_pago || [])[i]));
 
-        const d1 = formatPdfDate(document.getElementById('date1').value) || "30/09/2026";
-        const d2 = formatPdfDate(document.getElementById('date2').value) || "30/10/2026";
-        const d3 = formatPdfDate(document.getElementById('date3').value) || "15/12/2026";
-        
         const payloadPlayers = window.currentPlayers.map(p => ({
             ...p,
-            VisoriaLocation: lugarVisoria,
+            VisoriaLocation: campaign.torneo,
             PaymentDate1: d1,
             PaymentDate2: d2,
             PaymentDate3: d3

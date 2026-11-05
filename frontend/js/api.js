@@ -97,3 +97,37 @@ async function syncConfig(url) {
     const data = await response.json().catch(() => ({}));
     return { ok: response.ok, status: response.status, data: data };
 }
+
+// --- Campañas (importación, validación y corrección de filas) ---
+// Devuelven { ok, status, data } sin lanzar por 4xx/5xx: la pantalla muestra el mensaje del servidor.
+async function apiCall(url, options) {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, data: data };
+}
+
+// fields: { torneo, fecha_pago_1, fecha_pago_2, fecha_pago_3, requerir_ambos }
+function createCampaign(file, fields) {
+    const formData = new FormData();
+    formData.append('file', file);
+    for (const [k, v] of Object.entries(fields)) formData.append(k, v);
+    return apiCall(`${API_URL}/campaigns`, { method: 'POST', body: formData });
+}
+
+function getCampaign(id) {
+    return apiCall(`${API_URL}/campaigns/${encodeURIComponent(id)}`);
+}
+
+// patch: { correo: "x@y.com", movil: "320..." } (solo los campos que cambian)
+function patchRecipient(campaignId, recipientId, patch) {
+    return apiCall(`${API_URL}/campaigns/${encodeURIComponent(campaignId)}/recipients/${encodeURIComponent(recipientId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch)
+    });
+}
+
+// Puente temporal: los destinatarios en el formato del flujo de envío actual.
+function getCampaignPlayers(id) {
+    return apiCall(`${API_URL}/campaigns/${encodeURIComponent(id)}/players`);
+}

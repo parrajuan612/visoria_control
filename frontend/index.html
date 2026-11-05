@@ -39,7 +39,7 @@
     </div>
 
     <!-- CONTENEDOR PRINCIPAL -->
-    <div class="max-w-4xl mx-auto pt-12 px-4 pb-12">
+    <div class="max-w-6xl mx-auto pt-12 px-4 pb-12">
         <div class="bg-white rounded-xl shadow-xl overflow-hidden">
             
             <div class="bg-blue-900 p-6 text-white text-center relative">
@@ -55,15 +55,21 @@
                 <div id="step1" class="step-hidden">
                     <h2 class="text-xl font-bold text-gray-700 border-b pb-2 mb-6">Paso 1: Configuración de Torneos</h2>
                     
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    <div class="grid grid-cols-1 gap-6 mb-6">
                         <div>
-                            <label class="block text-sm font-medium text-gray-600 mb-1">Lugar de Visoria</label>
-                            <input type="text" id="visoria" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Ej: Soccer Melgar">
+                            <label for="torneo" class="block text-sm font-medium text-gray-600 mb-1">Torneo donde se becó a los jugadores <span class="text-red-500">*</span></label>
+                            <input type="text" id="torneo" maxlength="120" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 focus:outline-none" placeholder="Ej: Copa Majestic Internacional">
+                            <p class="text-xs text-gray-500 mt-1">Aparece en el encabezado de cada propuesta, tal como lo escribas.</p>
                         </div>
+                        <label class="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                            <input type="checkbox" id="requireBoth" class="rounded border-gray-300">
+                            Exigir móvil y correo en todas las filas (por defecto basta con uno de los dos)
+                        </label>
                     </div>
 
                     <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 mb-6">
-                        <h3 class="font-semibold text-gray-700 mb-4">Fechas Límite (Aplica para todos)</h3>
+                        <h3 class="font-semibold text-gray-700 mb-1">Fechas de pago (aplican para todos)</h3>
+                        <p class="text-xs text-gray-500 mb-4">Llénalas en orden. Cada beca usa las primeras que necesite: 30 % y 50 % las 3, 70 % las 2 primeras y 100 % la 1ª.</p>
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
                                 <label class="block text-xs font-medium text-gray-500 mb-1">Pago #1</label>
@@ -101,7 +107,10 @@
 
                     <p class="text-xs text-gray-500 mb-3">Columnas esperadas: Nombre, Club, Beca, Año de nacimiento (solo el año, ej. 2010), Acudiente, Móvil y Correo. Basta con un móvil o un correo por fila.</p>
                     <div id="validationSummary" class="hidden mb-3 text-sm font-medium"></div>
-                    <div id="validationTable" class="hidden bg-gray-50 border border-gray-200 rounded p-4 mb-6 max-h-96 overflow-y-auto">
+                    <div id="validationFilters" class="hidden flex-wrap gap-2 mb-3" role="group" aria-label="Filtrar filas"></div>
+                    <div id="validationToast" class="hidden" role="status" aria-live="polite"></div>
+                    <p class="text-xs text-gray-500 mb-2">Haz clic en una celda para corregirla (Enter guarda, Esc cancela). Se vuelve a validar al instante, sin subir el archivo otra vez.</p>
+                    <div id="validationTable" class="hidden bg-gray-50 border border-gray-200 rounded p-4 mb-6 max-h-[32rem] overflow-auto">
                         <!-- Aquí se inyectará la tabla -->
                     </div>
 
@@ -186,6 +195,7 @@
     <!-- Scripts unificados -->
     <script src="./js/api.js"></script>
     <script src="./js/config.js"></script>
+    <script src="./js/campaign.js"></script>
     <script src="./js/app.js"></script>
 </body>
 </html>
