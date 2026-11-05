@@ -1,4 +1,4 @@
-package handlers
+package httpadapter
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"strings"
 	"visoria-control/internal/platform/log"
 
-	"visoria-control/internal/core/domain"
-	"visoria-control/internal/core/ports"
+	"visoria-control/internal/domain"
+	"visoria-control/internal/ports"
 
 	"github.com/gin-gonic/gin"
 )

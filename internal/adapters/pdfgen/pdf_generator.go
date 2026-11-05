@@ -1,34 +1,60 @@
-package external
+package pdfgen
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	"visoria-control/internal/core/domain"
-	"visoria-control/internal/core/ports"
+	"visoria-control/internal/domain"
+	"visoria-control/internal/ports"
 
 	"github.com/jung-kurt/gofpdf"
 )
 
-type pdfGenerator struct{}
+// PDFDir es la carpeta donde se guardan las propuestas generadas.
+const PDFDir = "uploads/pdfs"
 
-func NewPDFGenerator() ports.PDFGenerator {
-	return &pdfGenerator{}
+type pdfGenerator struct{ dir string }
+
+var (
+	_ ports.PDFGenerator  = (*pdfGenerator)(nil)
+	_ ports.DocumentStore = (*pdfGenerator)(nil)
+)
+
+// New devuelve el generador gofpdf, que además es el DocumentStore de sus archivos.
+func New(dir string) *pdfGenerator {
+	return &pdfGenerator{dir: dir}
+}
+
+// FileName es la única fuente del nombre del PDF de un jugador.
+func (g *pdfGenerator) FileName(player domain.Player) string {
+	return fmt.Sprintf("%s_%s.pdf", strings.ReplaceAll(player.Name, " ", "_"), player.FileID)
+}
+
+func (g *pdfGenerator) Exists(_ context.Context, player domain.Player) (bool, error) {
+	info, err := os.Stat(filepath.Join(g.dir, g.FileName(player)))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return info.Size() > 0, nil
 }
 
 func (g *pdfGenerator) Generate(player domain.Player, tournament domain.TournamentInfo) (string, error) {
 
-	err := os.MkdirAll("uploads/pdfs", os.ModePerm)
+	err := os.MkdirAll(g.dir, os.ModePerm)
 	if err != nil {
 		return "", err
 	}
 
-	// 👉 Paso 3: Usamos el ID único para nombrar el archivo físico
-	nombreSeguro := strings.ReplaceAll(player.Name, " ", "_")
-	fileName := fmt.Sprintf("uploads/pdfs/%s_%s.pdf", nombreSeguro, player.FileID)
+	fileName := filepath.Join(g.dir, g.FileName(player))
 
 	pdf := gofpdf.New("P", "mm", "A4", "")
 

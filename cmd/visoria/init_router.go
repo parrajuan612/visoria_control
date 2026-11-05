@@ -1,13 +1,13 @@
 package main
 
 import (
-	"visoria-control/internal/adapters/handlers"
+	httpadapter "visoria-control/internal/adapters/http"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter(r *gin.Engine, handler *handlers.VisoriaHandler, allowedOrigins []string) {
+func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, allowedOrigins []string) {
 	// CORS restringido a orígenes explícitos (el frontend es same-origin, así que
 	// en producción basta con BASE_URL). Nunca "*" junto con credenciales.
 	r.Use(cors.New(cors.Config{

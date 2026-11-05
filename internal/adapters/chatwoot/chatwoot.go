@@ -15,8 +15,8 @@ import (
 	"strings"
 	"sync"
 
-	"visoria-control/internal/core/ports"
 	"visoria-control/internal/platform/log"
+	"visoria-control/internal/ports"
 )
 
 const maxBody = 1 << 20 // 1 MiB por respuesta

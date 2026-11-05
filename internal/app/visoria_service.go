@@ -1,17 +1,16 @@
-package services
+package app
 
 import (
 	"context"
 	"fmt"
 	"mime/multipart"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"visoria-control/internal/core/domain"
-	"visoria-control/internal/core/ports"
+	"visoria-control/internal/domain"
 	"visoria-control/internal/platform/log"
+	"visoria-control/internal/ports"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -26,15 +25,17 @@ type Options struct {
 type visoriaService struct {
 	repo   ports.TournamentRepository
 	pdfGen ports.PDFGenerator
+	docs   ports.DocumentStore
 	waAPI  ports.WhatsAppAPI
 	chat   ports.ChatwootClient
 	opts   Options
 }
 
-func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, waAPI ports.WhatsAppAPI, chat ports.ChatwootClient, opts Options) ports.VisoriaService {
+func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, docs ports.DocumentStore, waAPI ports.WhatsAppAPI, chat ports.ChatwootClient, opts Options) ports.VisoriaService {
 	return &visoriaService{
 		repo:   repo,
 		pdfGen: pdfGen,
+		docs:   docs,
 		waAPI:  waAPI,
 		chat:   chat,
 		opts:   opts,
@@ -170,9 +171,10 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 		}
 
 		// Nunca enviar si el PDF no existe: Meta respondería 200 y fallaría después al descargarlo.
-		nombrePDF := strings.ReplaceAll(p.Name, " ", "_")
-		rutaPDF := fmt.Sprintf("uploads/pdfs/%s_%s.pdf", nombrePDF, p.FileID)
-		if info, errPDF := os.Stat(rutaPDF); errPDF != nil || info.Size() == 0 {
+		if ok, errPDF := s.docs.Exists(ctx, p); errPDF != nil || !ok {
+			if errPDF != nil {
+				lg.Error("no se pudo verificar el PDF", "file_id", p.FileID, "error", errPDF)
+			}
 			progressChan <- fmt.Sprintf("❌ Error: no se envió a %s porque su PDF no existe o no se generó", p.Name)
 			continue
 		}
@@ -190,7 +192,7 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 		becaNum := strings.ReplaceAll(p.Scholarship, "%", "")
 
 		nombreSeguro := strings.ReplaceAll(p.Name, " ", "_")
-		pdfURL := fmt.Sprintf("%s/pdfs/%s_%s.pdf", s.opts.BaseURL, nombreSeguro, p.FileID)
+		pdfURL := fmt.Sprintf("%s/pdfs/%s", s.opts.BaseURL, s.docs.FileName(p))
 
 		components := []interface{}{
 			map[string]interface{}{

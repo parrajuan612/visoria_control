@@ -1,4 +1,4 @@
-package repository
+package sheets
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"visoria-control/internal/platform/httpx"
 	"visoria-control/internal/platform/log"
 
-	"visoria-control/internal/core/domain"
+	"visoria-control/internal/domain"
 )
 
 type csvTournamentRepository struct {

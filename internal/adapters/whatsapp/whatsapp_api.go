@@ -1,4 +1,4 @@
-package external
+package whatsapp
 
 import (
 	"bytes"
@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"visoria-control/internal/core/ports"
 	"visoria-control/internal/platform/httpx"
+	"visoria-control/internal/ports"
 )
 
 type whatsappAPI struct {
@@ -18,7 +18,7 @@ type whatsappAPI struct {
 	client        *http.Client
 }
 
-func NewWhatsAppAPI(accessToken, phoneNumberID, apiVersion string) ports.WhatsAppAPI {
+func New(accessToken, phoneNumberID, apiVersion string) ports.WhatsAppAPI {
 	return &whatsappAPI{
 		accessToken:   accessToken,
 		phoneNumberID: phoneNumberID,
