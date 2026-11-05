@@ -3,27 +3,7 @@ package ports
 import (
 	"context"
 	"time"
-
-	"visoria-control/internal/domain"
 )
-
-// PDFGenerator genera la propuesta de un jugador y devuelve la ruta del archivo.
-type PDFGenerator interface {
-	Generate(player domain.Player, tournament domain.TournamentInfo) (string, error)
-}
-
-// DocumentStore es la fuente única de verdad sobre dónde vive el documento de
-// un jugador: evita calcular su nombre en varios lugares (SDD §2.1-C).
-type DocumentStore interface {
-	// FileName es el nombre público del PDF, p. ej. "NOMBRE_APELLIDO_<fileID>.pdf".
-	FileName(player domain.Player) string
-	// Exists indica si el PDF existe y no está vacío.
-	Exists(ctx context.Context, player domain.Player) (bool, error)
-}
-
-type WhatsAppAPI interface {
-	SendTemplate(ctx context.Context, phone string, templateName string, language string, components []interface{}) error
-}
 
 // ChatwootClient deja constancia en Chatwoot de lo enviado al acudiente.
 // La implementación publica una NOTA PRIVADA (nunca un mensaje al acudiente).
@@ -31,9 +11,9 @@ type ChatwootClient interface {
 	RegisterNote(ctx context.Context, phone, contactName, content string) error
 }
 
-// EmailAttachment es un archivo adjunto leído desde disco al momento de enviar.
+// EmailAttachment es un archivo adjunto.
 type EmailAttachment struct {
-	Path        string // ruta del archivo
+	Data        []byte // contenido
 	Filename    string // nombre visible, p. ej. "JUGADOR - BECA 50.pdf"
 	ContentType string // por defecto application/pdf
 }
@@ -54,8 +34,10 @@ type EmailMessage struct {
 // EmailSender envía correos. SMTP respondió OK significa "aceptado", no "entregado".
 // La implementación debe clasificar los errores (permanente / transitorio / cuota).
 type EmailSender interface {
-	// Send devuelve el Message-ID efectivo del mensaje aceptado.
+	// Send devuelve el Message-ID efectivo del mensaje aceptado. Los errores del servidor son *ProviderError.
 	Send(ctx context.Context, msg EmailMessage) (messageID string, err error)
+	// Verify comprueba la conexión y las credenciales sin enviar nada.
+	Verify(ctx context.Context) error
 }
 
 // Bounce es un rebote (DSN) detectado en el buzón.

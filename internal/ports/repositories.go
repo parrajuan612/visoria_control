@@ -7,13 +7,6 @@ import (
 	"visoria-control/internal/domain"
 )
 
-// TournamentRepository: consulta de la configuración maestra vigente (en memoria).
-type TournamentRepository interface {
-	// Apply reemplaza la configuración vigente por completo.
-	Apply(cfg domain.MasterConfig)
-	GetTournamentForPlayer(ctx context.Context, birthYear int, scholarship string) (domain.TournamentInfo, error)
-}
-
 // ErrDeliveryNotFound: no existe la entrega pedida.
 var ErrDeliveryNotFound = errors.New("entrega no encontrada")
 
@@ -32,4 +25,8 @@ type DeliveryRepo interface {
 	// actual, escribe, ajusta contadores, emite el evento SSE e indexa el ID del proveedor).
 	// Devuelve ErrDeliveryNotFound si la entrega no existe.
 	Transition(ctx context.Context, campaignID string, t domain.Transition) (TransitionResult, error)
+	// List devuelve todas las entregas de la campaña.
+	List(ctx context.Context, campaignID string) ([]domain.Delivery, error)
+	// Counters devuelve los contadores "{canal}:{ESTADO}" y "{canal}:total" de la campaña.
+	Counters(ctx context.Context, campaignID string) (map[string]int, error)
 }

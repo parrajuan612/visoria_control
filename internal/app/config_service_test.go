@@ -51,9 +51,6 @@ func (f *fakeStore) SetSourceURL(_ context.Context, u string) error {
 type fakeApplier struct{ applied []domain.MasterConfig }
 
 func (f *fakeApplier) Apply(c domain.MasterConfig) { f.applied = append(f.applied, c) }
-func (f *fakeApplier) GetTournamentForPlayer(context.Context, int, string) (domain.TournamentInfo, error) {
-	return domain.TournamentInfo{}, nil
-}
 
 func validCfg() domain.MasterConfig {
 	eur := func(n int64) domain.Money { return domain.Money(n * 100) } // importes en euros enteros

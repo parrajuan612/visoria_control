@@ -72,12 +72,12 @@ func TestValoresInvalidos(t *testing.T) {
 	e := validEnv()
 	e["CHATWOOT_INBOX_ID"] = "dos"
 	e["WHATSAPP_PAUSE"] = "rápido"
-	e["SMTP_HOST"] = "smtp.gmail.com"
+	e["SMTP_USER"] = "becas@gmail.com"
 	_, err := fromLookup(lookup(e))
 	if err == nil {
 		t.Fatal("se esperaba error")
 	}
-	for _, s := range []string{"CHATWOOT_INBOX_ID", "WHATSAPP_PAUSE", "SMTP_USER"} {
+	for _, s := range []string{"CHATWOOT_INBOX_ID", "WHATSAPP_PAUSE", "SMTP_APP_PASSWORD"} {
 		if !strings.Contains(err.Error(), s) {
 			t.Errorf("falta %s en: %v", s, err)
 		}
@@ -123,5 +123,42 @@ func TestDocs(t *testing.T) {
 		if _, err := fromLookup(lookup(e)); err == nil || !strings.Contains(err.Error(), "DOCS_BATCH_SIZE") {
 			t.Errorf("DOCS_BATCH_SIZE=%q debía fallar: %v", bad, err)
 		}
+	}
+}
+
+func TestCorreoYWhatsAppDeEnvio(t *testing.T) {
+	c, err := fromLookup(lookup(validEnv()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SMTP.Enabled() || c.SMTP.Host != "smtp.gmail.com" || c.SMTP.Port != 587 || c.SMTP.Security != "starttls" || c.SMTP.DailyQuota != 450 ||
+		c.SMTP.Pause != 1500*time.Millisecond || c.SMTP.FromName != "Majestic Intercambio Deportivo" {
+		t.Errorf("SMTP por defecto: %+v", c.SMTP)
+	}
+	if c.WhatsApp.Template != "purchase_receipt_3" || c.WhatsApp.Language != "es_CO" || c.WhatsApp.RatePerSec != 5 || len(c.DispatchAllowlist) != 0 {
+		t.Errorf("WhatsApp por defecto: %+v %v", c.WhatsApp, c.DispatchAllowlist)
+	}
+	e := validEnv()
+	e["SMTP_USER"], e["SMTP_APP_PASSWORD"] = "becas@gmail.com", "abcd efgh ijkl mnop"
+	e["WHATSAPP_RATE_PER_SEC"], e["WHATSAPP_TEMPLATE"] = "2,5", "otra_plantilla"
+	e["DISPATCH_ALLOWLIST"] = " 573209323449 , a@b.co,, "
+	c, err = fromLookup(lookup(e))
+	if err != nil || !c.SMTP.Enabled() || c.SMTP.AppPassword != "abcdefghijklmnop" || c.WhatsApp.RatePerSec != 2.5 || c.WhatsApp.Template != "otra_plantilla" ||
+		len(c.DispatchAllowlist) != 2 || c.DispatchAllowlist[0] != "573209323449" {
+		t.Errorf("con valores: %+v %v %v", c.SMTP, c.WhatsApp, c.DispatchAllowlist)
+	}
+	// Usuario sin contraseña de aplicación; seguridad desconocida; ritmo fuera de rango.
+	for _, kv := range [][2]string{{"SMTP_USER", "x@gmail.com"}, {"SMTP_SECURITY", "ssl"}, {"WHATSAPP_RATE_PER_SEC", "500"}, {"WHATSAPP_RATE_PER_SEC", "abc"}} {
+		bad := validEnv()
+		bad[kv[0]] = kv[1]
+		if _, err := fromLookup(lookup(bad)); err == nil || !strings.Contains(err.Error(), map[string]string{"SMTP_USER": "SMTP_APP_PASSWORD", "SMTP_SECURITY": "SMTP_SECURITY", "WHATSAPP_RATE_PER_SEC": "WHATSAPP_RATE_PER_SEC"}[kv[0]]) {
+			t.Errorf("%v debía fallar: %v", kv, err)
+		}
+	}
+	// Servidor local de pruebas: sin contraseña.
+	e = validEnv()
+	e["SMTP_USER"], e["SMTP_SECURITY"], e["SMTP_HOST"] = "a@b.co", "none", "127.0.0.1"
+	if c, err := fromLookup(lookup(e)); err != nil || !c.SMTP.Enabled() {
+		t.Errorf("modo none: %v", err)
 	}
 }

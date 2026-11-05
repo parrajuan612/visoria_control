@@ -18,7 +18,7 @@ import (
 type ConfigService struct {
 	source      ports.ConfigSource
 	store       ports.ConfigStore
-	applier     ports.TournamentRepository
+	applier     ports.ConfigApplier
 	defaultURL  string
 	validateURL func(string) error
 	now         func() time.Time
@@ -28,7 +28,7 @@ type ConfigService struct {
 
 // NewConfigService crea el servicio. defaultURL puede estar vacío; validateURL valida
 // las URLs recibidas por la API (por ejemplo, solo hojas de Google).
-func NewConfigService(source ports.ConfigSource, store ports.ConfigStore, applier ports.TournamentRepository,
+func NewConfigService(source ports.ConfigSource, store ports.ConfigStore, applier ports.ConfigApplier,
 	defaultURL string, validateURL func(string) error) *ConfigService {
 	return &ConfigService{source: source, store: store, applier: applier,
 		defaultURL: strings.TrimSpace(defaultURL), validateURL: validateURL, now: time.Now}

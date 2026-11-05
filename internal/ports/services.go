@@ -2,22 +2,9 @@ package ports
 
 import (
 	"context"
-	"mime/multipart"
 
 	"visoria-control/internal/domain"
 )
-
-// VisoriaService: lo que los adaptadores de entrada (HTTP) pueden pedirle al negocio.
-type VisoriaService interface {
-	// ProcessPlayersExcel lee y valida el Excel. Los errores de formato envuelven
-	// ErrInvalidSpreadsheet; sin configuración sincronizada devuelve ErrNoConfig.
-	ProcessPlayersExcel(ctx context.Context, file multipart.File) ([]domain.Player, domain.BatchSummary, error)
-	// ToPlayers adapta destinatarios validados al modelo del flujo de envío actual (puente temporal
-	// hasta que la generación y el envío pasen a las colas, Fases 4-5).
-	ToPlayers(ctx context.Context, recs []domain.Recipient) []domain.Player
-	GenerateDocuments(ctx context.Context, players []domain.Player) ([]string, error)
-	DispatchWhatsAppMessages(ctx context.Context, players []domain.Player, progressChan chan<- string) error
-}
 
 // ConfigUseCase: sincronización y consulta de la configuración maestra.
 type ConfigUseCase interface {

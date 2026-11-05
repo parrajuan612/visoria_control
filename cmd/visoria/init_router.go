@@ -7,7 +7,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *httpadapter.ConfigHandler, campHandler *httpadapter.CampaignHandler, tplHandler *httpadapter.TemplateHandler, allowedOrigins []string) {
+type handlers struct {
+	config    *httpadapter.ConfigHandler
+	campaigns *httpadapter.CampaignHandler
+	templates *httpadapter.TemplateHandler
+}
+
+func InitRouter(r *gin.Engine, h handlers, allowedOrigins []string) {
 	// CORS restringido a orígenes explícitos (el frontend es same-origin, así que
 	// en producción basta con BASE_URL). Nunca "*" junto con credenciales.
 	r.Use(cors.New(cors.Config{
@@ -17,35 +23,33 @@ func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *
 		AllowCredentials: true,
 	}))
 
-	// Hacer públicos los PDFs y archivos JS
-	r.Static("/pdfs", "./uploads/pdfs")
+	// Frontend estático. Los PDF NO se sirven públicamente: contienen datos de menores y salen
+	// directo a WhatsApp (como medio) o al correo (como adjunto).
 	r.Static("/js", "./frontend/js")
-
-	// 👇 SOLUCIÓN: Servir el index.html tanto en la raíz ("/") como en ("/visoria")
 	r.StaticFile("/", "./frontend/index.html")
 	r.StaticFile("/visoria", "./frontend/index.html")
 
 	v1 := r.Group("/api/v1")
 	{
 		// Configuración maestra (Google Sheets)
-		v1.GET("/config", cfgHandler.Get)
-		v1.POST("/config/sync", cfgHandler.Sync)
+		v1.GET("/config", h.config.Get)
+		v1.POST("/config/sync", h.config.Sync)
 
 		// Campañas: importación, validación y corrección de filas
-		v1.GET("/campaigns", campHandler.List)
-		v1.POST("/campaigns", campHandler.Create)
-		v1.GET("/campaigns/:id", campHandler.Get)
-		v1.GET("/campaigns/:id/players", campHandler.Players)
-		v1.PATCH("/campaigns/:id/recipients/:rid", campHandler.EditRecipient)
-		v1.POST("/campaigns/:id/documents", campHandler.Documents)
+		v1.GET("/campaigns", h.campaigns.List)
+		v1.POST("/campaigns", h.campaigns.Create)
+		v1.GET("/campaigns/:id", h.campaigns.Get)
+		v1.PATCH("/campaigns/:id/recipients/:rid", h.campaigns.EditRecipient)
+
+		// Documentos y envío
+		v1.POST("/campaigns/:id/documents", h.campaigns.Documents)
+		v1.POST("/campaigns/:id/dispatch", h.campaigns.Dispatch)
+		v1.POST("/campaigns/:id/retry", h.campaigns.Retry)
+		v1.POST("/campaigns/:id/resume", h.campaigns.Resume)
+		v1.GET("/campaigns/:id/deliveries", h.campaigns.Deliveries)
 
 		// Plantillas Word
-		v1.GET("/templates", tplHandler.List)
-		v1.PUT("/templates/:key", tplHandler.Install)
-
-		// Flujo principal (Wizard)
-		v1.POST("/players/upload", handler.UploadPlayersExcel)
-		v1.POST("/documents/generate", handler.GeneratePDFs)
-		v1.POST("/messages/send", handler.SendWhatsApp)
+		v1.GET("/templates", h.templates.List)
+		v1.PUT("/templates/:key", h.templates.Install)
 	}
 }

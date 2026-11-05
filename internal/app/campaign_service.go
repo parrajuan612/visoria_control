@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -221,4 +223,11 @@ func sameJSON(a, b domain.Recipient) bool {
 // IsNotFound agrupa los errores de "no existe" para que los adaptadores respondan 404.
 func IsNotFound(err error) bool {
 	return errors.Is(err, ports.ErrCampaignNotFound) || errors.Is(err, ports.ErrRecipientNotFound)
+}
+
+// randomID genera un ID estable y opaco (no depende de ningún dato del jugador).
+func randomID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

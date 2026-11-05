@@ -33,3 +33,8 @@ var (
 	// ErrSourceUnavailable: no se pudo descargar o interpretar la hoja como CSV.
 	ErrSourceUnavailable = errors.New("no se pudo obtener la hoja de configuración")
 )
+
+// ConfigApplier reemplaza la configuración vigente en memoria.
+type ConfigApplier interface {
+	Apply(cfg domain.MasterConfig)
+}

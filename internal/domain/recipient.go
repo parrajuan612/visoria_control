@@ -52,6 +52,15 @@ type Document struct {
 	GeneratedAt time.Time `json:"generado_en"`
 	// Error es el motivo si no se pudo generar (mensaje del cliente: «Quedaron campos XXX…», etc.).
 	Error string `json:"error,omitempty"`
+	// MediaID es el identificador del PDF subido a Meta (WhatsApp) y cuándo vence (30 días): se reutiliza
+	// entre reintentos y se vuelve a subir si venció.
+	MediaID        string    `json:"media_id,omitempty"`
+	MediaExpiresAt time.Time `json:"media_expires_at,omitempty"`
+}
+
+// MediaValid indica si el medio subido a Meta sigue vigente (con un margen de 1 día).
+func (d Document) MediaValid(now time.Time) bool {
+	return d.MediaID != "" && now.Add(24*time.Hour).Before(d.MediaExpiresAt)
 }
 
 // HasDocument indica que el PDF existe y se puede enviar.

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -125,4 +127,36 @@ func (r *DeliveryRepo) Transition(ctx context.Context, campaignID string, t doma
 		return ports.TransitionResult{}, ports.ErrDeliveryNotFound
 	}
 	return ports.TransitionResult{Outcome: domain.Outcome(code), Previous: domain.DeliveryStatus(prev)}, nil
+}
+
+// List devuelve todas las entregas de la campaña ordenadas por clave.
+func (r *DeliveryRepo) List(ctx context.Context, campaignID string) ([]domain.Delivery, error) {
+	all, err := r.rdb.HGetAll(ctx, deliveriesKey(campaignID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("leyendo entregas: %w", err)
+	}
+	out := make([]domain.Delivery, 0, len(all))
+	for key, raw := range all {
+		var d domain.Delivery
+		if err := json.Unmarshal([]byte(raw), &d); err != nil {
+			return nil, fmt.Errorf("la entrega %s está corrupta: %w", key, err)
+		}
+		out = append(out, d)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
+}
+
+// Counters devuelve los contadores de la campaña ("whatsapp:QUEUED", "email:total"…).
+func (r *DeliveryRepo) Counters(ctx context.Context, campaignID string) (map[string]int, error) {
+	all, err := r.rdb.HGetAll(ctx, countersKey(campaignID)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("leyendo contadores: %w", err)
+	}
+	out := make(map[string]int, len(all))
+	for k, v := range all {
+		n, _ := strconv.Atoi(v)
+		out[k] = n
+	}
+	return out, nil
 }

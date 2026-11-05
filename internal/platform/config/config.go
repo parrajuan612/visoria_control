@@ -31,6 +31,10 @@ type Config struct {
 
 	Docs Docs
 
+	// DispatchAllowlist: si no está vacía, SOLO se envía a estos móviles y correos (el resto se omite).
+	// Es una válvula de seguridad para las pruebas con datos reales.
+	DispatchAllowlist []string
+
 	WhatsApp WhatsApp
 	Chatwoot Chatwoot
 	Redis    Redis
@@ -53,6 +57,9 @@ type WhatsApp struct {
 	Token      string
 	PhoneID    string // Phone Number ID (no el WABA ID)
 	APIVersion string
+	Template   string  // plantilla aprobada de la propuesta
+	Language   string  // idioma de la plantilla
+	RatePerSec float64 // mensajes por segundo (muy por debajo del límite de Meta)
 }
 
 type Chatwoot struct {
@@ -70,20 +77,34 @@ type Redis struct {
 	DB       int
 }
 
-// SMTP e IMAP se usarán en la Fase 6 (ADR-9). Son opcionales por ahora.
+// SMTP: correo por Gmail (ADR-9). El canal se habilita con SMTP_USER y SMTP_APP_PASSWORD.
 type SMTP struct {
 	Host, User, AppPassword, FromName string
 	Port                              int
+	Security                          string // starttls (por defecto) | tls | none (servidor local de pruebas)
 	DailyQuota                        int
 	Pause                             time.Duration
+	WhatsAppContact                   string // WhatsApp del botón «Escríbenos» (vacío = el del cliente)
 }
 
-func (s SMTP) Enabled() bool { return s.Host != "" && s.User != "" }
+func (s SMTP) Enabled() bool {
+	return s.Host != "" && s.User != "" && (s.AppPassword != "" || s.Security == "none")
+}
 
 type IMAP struct {
 	Host         string
 	Port         int
 	PollInterval time.Duration
+}
+
+func csv(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Load lee .env (salvo en producción) y el entorno, y valida. Devuelve un único
@@ -126,6 +147,18 @@ func fromLookup(get func(string) string) (*Config, error) {
 		}
 		return n
 	}
+	float := func(key string, def float64) float64 {
+		v := strings.TrimSpace(get(key))
+		if v == "" {
+			return def
+		}
+		n, err := strconv.ParseFloat(strings.Replace(v, ",", ".", 1), 64)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s debe ser un número, recibió %q", key, v))
+			return def
+		}
+		return n
+	}
 	duration := func(key string, def time.Duration) time.Duration {
 		v := strings.TrimSpace(get(key))
 		if v == "" {
@@ -150,6 +183,9 @@ func fromLookup(get func(string) string) (*Config, error) {
 			Token:      required("WHATSAPP_TOKEN"),
 			PhoneID:    required("WHATSAPP_PHONE_ID"),
 			APIVersion: str("WHATSAPP_API_VERSION", "v19.0"),
+			Template:   str("WHATSAPP_TEMPLATE", "purchase_receipt_3"),
+			Language:   str("WHATSAPP_LANGUAGE", "es_CO"),
+			RatePerSec: float("WHATSAPP_RATE_PER_SEC", 5),
 		},
 		Chatwoot: Chatwoot{
 			URL:       strings.TrimRight(str("CHATWOOT_URL", "http://127.0.0.1:3000"), "/"),
@@ -163,13 +199,15 @@ func fromLookup(get func(string) string) (*Config, error) {
 			DB:       integer("REDIS_DB", 0),
 		},
 		SMTP: SMTP{
-			Host:        str("SMTP_HOST", ""),
-			Port:        integer("SMTP_PORT", 587),
-			User:        str("SMTP_USER", ""),
-			AppPassword: str("SMTP_APP_PASSWORD", ""),
-			FromName:    str("SMTP_FROM_NAME", ""),
-			DailyQuota:  integer("SMTP_DAILY_QUOTA", 450),
-			Pause:       time.Duration(integer("SMTP_PAUSE_MS", 1500)) * time.Millisecond,
+			Host:            str("SMTP_HOST", "smtp.gmail.com"),
+			Port:            integer("SMTP_PORT", 587),
+			User:            str("SMTP_USER", ""),
+			AppPassword:     strings.Join(strings.Fields(get("SMTP_APP_PASSWORD")), ""), // Google la muestra como «abcd efgh ijkl mnop»
+			FromName:        str("SMTP_FROM_NAME", "Majestic Intercambio Deportivo"),
+			Security:        strings.ToLower(str("SMTP_SECURITY", "starttls")),
+			DailyQuota:      integer("SMTP_DAILY_QUOTA", 450),
+			Pause:           time.Duration(integer("SMTP_PAUSE_MS", 1500)) * time.Millisecond,
+			WhatsAppContact: str("MAIL_WHATSAPP", ""),
 		},
 		IMAP: IMAP{
 			Host:         str("IMAP_HOST", "imap.gmail.com"),
@@ -182,7 +220,8 @@ func fromLookup(get func(string) string) (*Config, error) {
 			Timeout:     duration("DOCS_TIMEOUT", 10*time.Minute),
 			WorkDir:     str("DOCS_WORKDIR", ""),
 		},
-		WhatsAppPause: duration("WHATSAPP_PAUSE", 6*time.Second),
+		DispatchAllowlist: csv(get("DISPATCH_ALLOWLIST")),
+		WhatsAppPause:     duration("WHATSAPP_PAUSE", 6*time.Second),
 	}
 
 	if c.Docs.BatchSize < 1 || c.Docs.BatchSize > 100 {
@@ -191,8 +230,16 @@ func fromLookup(get func(string) string) (*Config, error) {
 	if c.Env == "production" && c.Redis.Password == "" {
 		errs = append(errs, errors.New("REDIS_PASSWORD es obligatoria en producción"))
 	}
-	if c.SMTP.Host != "" && (c.SMTP.User == "" || c.SMTP.AppPassword == "") {
-		errs = append(errs, errors.New("SMTP_HOST definido pero faltan SMTP_USER o SMTP_APP_PASSWORD"))
+	if c.SMTP.User != "" && c.SMTP.AppPassword == "" && c.SMTP.Security != "none" {
+		errs = append(errs, errors.New("SMTP_USER definido pero falta SMTP_APP_PASSWORD (la contraseña de aplicación de Gmail)"))
+	}
+	switch c.SMTP.Security {
+	case "starttls", "tls", "none":
+	default:
+		errs = append(errs, fmt.Errorf("SMTP_SECURITY debe ser starttls, tls o none, recibió %q", c.SMTP.Security))
+	}
+	if c.WhatsApp.RatePerSec <= 0 || c.WhatsApp.RatePerSec > 50 {
+		errs = append(errs, fmt.Errorf("WHATSAPP_RATE_PER_SEC debe estar entre 0 y 50, recibió %v", c.WhatsApp.RatePerSec))
 	}
 
 	c.CORSOrigins = []string{"http://localhost:8880"}

@@ -226,3 +226,71 @@ func TestErroresDeEntrada(t *testing.T) {
 		t.Error("estado inválido debe fallar antes de llamar a Redis")
 	}
 }
+
+func TestListYCounters(t *testing.T) {
+	repo, _, camp := setup(t)
+	ctx := context.Background()
+	for _, r := range []string{"r2", "r1"} {
+		d := domain.NewDelivery(camp, r, domain.ChannelWhatsApp, domain.KindProposal, now)
+		repo.Create(ctx, camp, d)
+	}
+	e := domain.NewDelivery(camp, "r1", domain.ChannelEmail, domain.KindProposal, now)
+	repo.Create(ctx, camp, e)
+	repo.Transition(ctx, camp, domain.Transition{Key: e.Key, To: domain.StatusSkipped, Source: domain.SourceSystem, At: now, Detail: "sin correo"})
+
+	list, err := repo.List(ctx, camp)
+	if err != nil || len(list) != 3 {
+		t.Fatalf("List: %v %v", list, err)
+	}
+	if list[0].Key > list[1].Key || list[1].Key > list[2].Key {
+		t.Errorf("deben venir ordenadas por clave: %v %v %v", list[0].Key, list[1].Key, list[2].Key)
+	}
+	c, err := repo.Counters(ctx, camp)
+	if err != nil || c["whatsapp:total"] != 2 || c["whatsapp:PENDING"] != 2 || c["email:total"] != 1 || c["email:SKIPPED"] != 1 || c["email:PENDING"] != 0 {
+		t.Errorf("contadores: %v %v", c, err)
+	}
+	if l, err := repo.List(ctx, "otra"); err != nil || len(l) != 0 {
+		t.Errorf("campaña vacía: %v %v", l, err)
+	}
+}
+
+func TestCuotaDiariaAtomica(t *testing.T) {
+	_, rdb, camp := setup(t)
+	q := NewQuota(rdb)
+	ctx := context.Background()
+	day := "d" + camp
+	for i := 0; i < 3; i++ {
+		if ok, err := q.Take(ctx, day, 3); err != nil || !ok {
+			t.Fatalf("envío %d: %v %v", i, ok, err)
+		}
+	}
+	if ok, _ := q.Take(ctx, day, 3); ok {
+		t.Error("el 4.º envío del día debe rechazarse")
+	}
+	// El contador no se pasa del límite aunque insistan.
+	if n, _ := rdb.Get(ctx, keyPrefix+"quota:gmail:"+day).Int(); n != 3 {
+		t.Errorf("contador=%d", n)
+	}
+	if ttl, _ := rdb.TTL(ctx, keyPrefix+"quota:gmail:"+day).Result(); ttl <= 0 || ttl > 48*time.Hour {
+		t.Errorf("ttl=%v", ttl)
+	}
+	// Carrera: 60 intentos con límite 10 → exactamente 10.
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	ok := 0
+	for i := 0; i < 60; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if good, err := q.Take(ctx, day+"b", 10); err == nil && good {
+				mu.Lock()
+				ok++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if ok != 10 {
+		t.Errorf("concedidos=%d, debían ser 10", ok)
+	}
+}

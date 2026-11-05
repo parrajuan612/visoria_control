@@ -17,6 +17,17 @@ import (
 
 // ---- simulados en memoria ----
 
+type fakeReader struct {
+	rows []domain.RawRow
+	err  error
+}
+
+func (f fakeReader) Read(context.Context, io.Reader) ([]domain.RawRow, error) { return f.rows, f.err }
+
+type fakeCfg struct{ cfg *domain.MasterConfig }
+
+func (f fakeCfg) Current() *domain.MasterConfig { return f.cfg }
+
 type memRepo struct {
 	mu        sync.Mutex
 	camps     map[string]domain.Campaign
@@ -136,6 +147,15 @@ func (f *memFiles) SavePDF(_ context.Context, c domain.Campaign, rid, src string
 	}
 	f.pdfs[rid] = b
 	return "pdf/" + rid + ".pdf", "sha-" + rid, nil
+}
+func (f *memFiles) ReadPDF(_ context.Context, _ domain.Campaign, rel string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	id := strings.TrimSuffix(strings.TrimPrefix(rel, "pdf/"), ".pdf")
+	if b, ok := f.pdfs[id]; ok {
+		return b, nil
+	}
+	return nil, errors.New("PDF no encontrado")
 }
 func (f *memFiles) SaveSnapshot(context.Context, domain.Campaign) error { f.snaps++; return nil }
 func (f *memFiles) Audit(_ context.Context, _ domain.Campaign, e domain.AuditEvent) error {

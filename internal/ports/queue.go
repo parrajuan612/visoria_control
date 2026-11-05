@@ -19,6 +19,9 @@ const (
 const (
 	TaskOpsPing   = "ops:ping"   // verificación de punta a punta de la cola
 	TaskDocRender = "doc:render" // genera las propuestas (docx -> PDF) de un lote de destinatarios
+	TaskWASend    = "wa:send"    // envía una propuesta por WhatsApp
+	TaskEmailSend = "email:send" // envía una propuesta por correo
+	TaskNote      = "chatwoot:note"
 )
 
 var (
@@ -46,3 +49,22 @@ type TaskQueue interface {
 // TaskHandler procesa una tarea. Devolver un error la reintenta con backoff,
 // salvo que envuelva ErrSkipRetry.
 type TaskHandler func(ctx context.Context, payload []byte) error
+
+// Attempt describe el intento actual de una tarea (para decidir si es el último).
+type Attempt struct{ Retried, MaxRetry int }
+
+// IsLast indica que si esta ejecución falla, la tarea no se volverá a intentar.
+func (a Attempt) IsLast() bool { return a.MaxRetry > 0 && a.Retried >= a.MaxRetry }
+
+type attemptKey struct{}
+
+// WithAttempt guarda el intento en el contexto (lo hace el adaptador de la cola).
+func WithAttempt(ctx context.Context, a Attempt) context.Context {
+	return context.WithValue(ctx, attemptKey{}, a)
+}
+
+// AttemptFrom devuelve el intento del contexto (cero si no hay).
+func AttemptFrom(ctx context.Context) Attempt {
+	a, _ := ctx.Value(attemptKey{}).(Attempt)
+	return a
+}

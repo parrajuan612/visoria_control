@@ -14,6 +14,10 @@ var (
 	ErrCampaignLocked = errors.New("la campaña ya no se puede editar")
 	// ErrGenerationRunning: ya se están generando las propuestas de la campaña.
 	ErrGenerationRunning = errors.New("Ya se están generando las propuestas de esta campaña.")
+	// ErrDispatchRunning: la campaña ya se despachó o está en curso.
+	ErrDispatchRunning = errors.New("Esta campaña ya se despachó. Para reenviar lo que falló use «Reenviar fallidos».")
+	// ErrCampaignPaused: hay que reanudar antes de continuar.
+	ErrCampaignPaused = errors.New("La campaña está en pausa. Corrija el problema y reanúdela.")
 )
 
 // InputError es un dato de entrada inválido; su mensaje es para mostrarlo al usuario tal cual.
@@ -45,6 +49,8 @@ type CampaignFiles interface {
 	// SavePDF guarda el PDF de un destinatario en pdf/{id}.pdf (copia desde src) y devuelve su ruta
 	// relativa y su SHA-256. Rechaza archivos vacíos o que no sean PDF.
 	SavePDF(ctx context.Context, c domain.Campaign, recipientID, src string) (rel, sha256 string, err error)
+	// ReadPDF lee el PDF guardado (ruta relativa a la carpeta de la campaña).
+	ReadPDF(ctx context.Context, c domain.Campaign, rel string) ([]byte, error)
 }
 
 // CreateCampaignInput son los datos para crear una campaña desde el Excel.

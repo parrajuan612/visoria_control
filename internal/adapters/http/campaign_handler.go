@@ -29,13 +29,13 @@ var reID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // CampaignHandler expone /api/v1/campaigns (SDD §4.2 y §4.3).
 type CampaignHandler struct {
-	uc     ports.CampaignUseCase
-	legacy ports.VisoriaService
-	docs   ports.DocumentUseCase
+	uc       ports.CampaignUseCase
+	docs     ports.DocumentUseCase
+	dispatch ports.DispatchUseCase
 }
 
-func NewCampaignHandler(uc ports.CampaignUseCase, legacy ports.VisoriaService, docs ports.DocumentUseCase) *CampaignHandler {
-	return &CampaignHandler{uc: uc, legacy: legacy, docs: docs}
+func NewCampaignHandler(uc ports.CampaignUseCase, docs ports.DocumentUseCase, dispatch ports.DispatchUseCase) *CampaignHandler {
+	return &CampaignHandler{uc: uc, docs: docs, dispatch: dispatch}
 }
 
 // fail traduce los errores de la aplicación a respuestas HTTP. Los errores internos no se
@@ -48,7 +48,8 @@ func (h *CampaignHandler) fail(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": ie.Message})
 	case errors.As(err, &tooBig):
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "El archivo supera el tamaño máximo de 10 MB."})
-	case errors.Is(err, ports.ErrNoConfig), errors.Is(err, ports.ErrCampaignLocked), errors.Is(err, ports.ErrGenerationRunning):
+	case errors.Is(err, ports.ErrNoConfig), errors.Is(err, ports.ErrCampaignLocked), errors.Is(err, ports.ErrGenerationRunning),
+		errors.Is(err, ports.ErrDispatchRunning), errors.Is(err, ports.ErrCampaignPaused):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, ports.ErrInvalidSpreadsheet):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
@@ -182,21 +183,6 @@ func (h *CampaignHandler) EditRecipient(c *gin.Context) {
 	c.JSON(http.StatusOK, res)
 }
 
-// Players: GET /api/v1/campaigns/:id/players — puente TEMPORAL: entrega los destinatarios en el
-// formato del flujo de envío actual (que aún recibe los jugadores desde el navegador).
-func (h *CampaignHandler) Players(c *gin.Context) {
-	id, ok := idParam(c, "id")
-	if !ok {
-		return
-	}
-	detail, err := h.uc.Get(c.Request.Context(), id)
-	if err != nil {
-		h.fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": h.legacy.ToPlayers(c.Request.Context(), detail.Recipients), "resumen": detail.Campaign.Resumen})
-}
-
 // Documents: POST /api/v1/campaigns/:id/documents — encola la generación de las propuestas (PDF).
 //
 //	202 → encolada (el progreso se ve en cada fila: «documento», y en el stream de eventos)
@@ -216,4 +202,69 @@ func (h *CampaignHandler) Documents(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusAccepted, gin.H{"message": "Generando las propuestas.", "resultado": res})
+}
+
+// Dispatch: POST /api/v1/campaigns/:id/dispatch  {"channels": ["whatsapp","email"]} (opcional).
+// Envía las propuestas de las filas válidas con su PDF. 202 con el resumen de lo encolado.
+func (h *CampaignHandler) Dispatch(c *gin.Context) {
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	var req struct {
+		Channels []string `json:"channels"`
+	}
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "El cuerpo debe ser JSON, por ejemplo {\"channels\": [\"whatsapp\", \"email\"]}."})
+			return
+		}
+	}
+	res, err := h.dispatch.Dispatch(c.Request.Context(), id, ports.DispatchInput{Channels: req.Channels, By: operatorName})
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": "Envío en curso.", "resultado": res})
+}
+
+// Retry: POST /api/v1/campaigns/:id/retry — reenvía lo que falló por motivos no permanentes.
+func (h *CampaignHandler) Retry(c *gin.Context) {
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	res, err := h.dispatch.Retry(c.Request.Context(), id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"resultado": res})
+}
+
+// Resume: POST /api/v1/campaigns/:id/resume — reanuda una campaña pausada.
+func (h *CampaignHandler) Resume(c *gin.Context) {
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.dispatch.Resume(c.Request.Context(), id); err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Campaña reanudada."})
+}
+
+// Deliveries: GET /api/v1/campaigns/:id/deliveries — estado real de cada envío y contadores.
+func (h *CampaignHandler) Deliveries(c *gin.Context) {
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	snap, err := h.dispatch.Snapshot(c.Request.Context(), id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, snap)
 }

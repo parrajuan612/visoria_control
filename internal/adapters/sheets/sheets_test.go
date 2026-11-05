@@ -220,37 +220,14 @@ func TestSourceLoad(t *testing.T) {
 
 func TestRepositorio(t *testing.T) {
 	r := NewRepository()
-	ctx := context.Background()
-	// Sin configuración todavía → "No definido" y no falla.
-	if info, err := r.GetTournamentForPlayer(ctx, 2012, "50%"); err != nil || info.Pricing.Total != "No definido" {
-		t.Fatalf("sin config: %+v %v", info, err)
+	if r.Current() != nil {
+		t.Fatal("sin sincronizar no hay configuración")
 	}
 	cfg, _ := Parse(strings.NewReader(fixture(t)))
 	r.Apply(cfg)
-
-	info, _ := r.GetTournamentForPlayer(ctx, 2012, "50%")
-	if info.Pricing.Total != "€ 1.550,00" || info.Pricing.Pago1 != "€ 500,00" || info.Pricing.Pago3 != "€ 550,00" {
-		t.Errorf("precios 50%%: %+v", info.Pricing)
-	}
-	if info.Category != "CADETE" {
-		t.Errorf("categoría: %q", info.Category)
-	}
-	// 2012 está en dos torneos: se listan todos (comportamiento histórico).
-	if want := "TORNEO COPA MIC FOOTBALL COSTA BRAVA-BARCELONA\n- TORNEO IDA EASTER CUP COMUNIDAD VALENCIANA"; info.Name != want {
-		t.Errorf("torneos: %q", info.Name)
-	}
-	// pagos ausentes → cadena vacía (el PDF cuenta los no vacíos)
-	if i70, _ := r.GetTournamentForPlayer(ctx, 2016, "70%"); i70.Pricing.Pago3 != "" || i70.Pricing.Pago2 != "€ 495,00" || i70.Category != "ALEVIN" {
-		t.Errorf("70%%: %+v", i70)
-	}
-	if i, _ := r.GetTournamentForPlayer(ctx, 2012, "99%"); i.Pricing.Total != "No definido" {
-		t.Errorf("beca inexistente: %+v", i.Pricing)
-	}
-	if i, _ := r.GetTournamentForPlayer(ctx, 2012, "sin beca"); i.Pricing.Total != "€ 2.800,00" {
-		t.Errorf("sin beca: %+v", i.Pricing)
-	}
-	if r.Current() == nil {
-		t.Error("Current debe devolver la configuración")
+	got := r.Current()
+	if got == nil || got.Hash() != cfg.Hash() {
+		t.Errorf("Current debe devolver lo aplicado: %v", got)
 	}
 }
 
@@ -266,7 +243,7 @@ func TestRepositorioSinCarreras(t *testing.T) {
 		close(done)
 	}()
 	for i := 0; i < 200; i++ {
-		r.GetTournamentForPlayer(context.Background(), 2012, "30%")
+		r.Current()
 	}
 	<-done
 }

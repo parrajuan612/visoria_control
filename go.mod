@@ -7,9 +7,9 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/hibiken/asynq v0.26.0
 	github.com/joho/godotenv v1.5.1
-	github.com/jung-kurt/gofpdf v1.16.2
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/xuri/excelize/v2 v2.11.0
+	golang.org/x/time v0.14.0
 )
 
 require (
@@ -51,6 +51,5 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	golang.org/x/time v0.14.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )

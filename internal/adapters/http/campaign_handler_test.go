@@ -41,26 +41,19 @@ func (f *fakeCamp) EditRecipient(_ context.Context, cid, rid string, p domain.Re
 	return ports.EditResult{Recipient: domain.Recipient{ID: rid, Estado: domain.RecipientValid}, Otros: []domain.Recipient{}}, f.editErr
 }
 
-type fakeLegacy struct{ ports.VisoriaService }
-
-func (fakeLegacy) ToPlayers(_ context.Context, recs []domain.Recipient) []domain.Player {
-	out := make([]domain.Player, len(recs))
-	for i, r := range recs {
-		out[i] = domain.Player{Name: r.Jugador, Status: "PENDING"}
-	}
-	return out
-}
-
 func router(f *fakeCamp) *gin.Engine { return routerDocs(f, fakeDocs{}) }
 
 func routerDocs(f *fakeCamp, d fakeDocs) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewCampaignHandler(f, fakeLegacy{}, d)
+	h := NewCampaignHandler(f, d, fakeDispatch)
 	r.POST("/campaigns", h.Create)
 	r.GET("/campaigns", h.List)
 	r.GET("/campaigns/:id", h.Get)
-	r.GET("/campaigns/:id/players", h.Players)
+	r.POST("/campaigns/:id/dispatch", h.Dispatch)
+	r.POST("/campaigns/:id/retry", h.Retry)
+	r.POST("/campaigns/:id/resume", h.Resume)
+	r.GET("/campaigns/:id/deliveries", h.Deliveries)
 	r.PATCH("/campaigns/:id/recipients/:rid", h.EditRecipient)
 	r.POST("/campaigns/:id/documents", h.Documents)
 	return r
@@ -160,7 +153,7 @@ func TestCreateErrores(t *testing.T) {
 	}
 }
 
-func TestGetListYPlayers(t *testing.T) {
+func TestGetList(t *testing.T) {
 	d := ports.CampaignDetail{Campaign: domain.CampaignView{Campaign: domain.Campaign{ID: "abc"}}, Recipients: []domain.Recipient{{ID: "r1", Jugador: "Ana"}}}
 	r := router(&fakeCamp{detail: d})
 	if code, out := call(r, "GET", "/campaigns/abc", nil, ""); code != 200 || out["recipients"] == nil {
@@ -169,15 +162,8 @@ func TestGetListYPlayers(t *testing.T) {
 	if code, out := call(r, "GET", "/campaigns", nil, ""); code != 200 || out["campaigns"] == nil {
 		t.Errorf("list vacío debe ser [] y no null: %d %v", code, out)
 	}
-	code, out := call(r, "GET", "/campaigns/abc/players", nil, "")
-	if players, _ := out["data"].([]any); code != 200 || len(players) != 1 || players[0].(map[string]any)["Name"] != "Ana" {
-		t.Errorf("players: %d %v", code, out)
-	}
 	if code, _ := call(router(&fakeCamp{getErr: ports.ErrCampaignNotFound}), "GET", "/campaigns/abc", nil, ""); code != 404 {
 		t.Errorf("no encontrada: %d", code)
-	}
-	if code, _ := call(router(&fakeCamp{getErr: ports.ErrCampaignNotFound}), "GET", "/campaigns/abc/players", nil, ""); code != 404 {
-		t.Errorf("players de campaña inexistente: %d", code)
 	}
 	// IDs con caracteres raros no llegan a Redis.
 	for _, bad := range []string{"a:b", "a%20b", "..", "x*"} {
@@ -271,5 +257,105 @@ func TestDocumentsEndpoint(t *testing.T) {
 	}
 	if code, _ := post(fakeDocs{}, "a:b"); code != 404 {
 		t.Errorf("id inválido: %d", code)
+	}
+}
+
+// ---- despacho ----
+
+type fakeDisp struct {
+	res    ports.DispatchResult
+	retry  ports.RetryResult
+	snap   ports.DeliverySnapshot
+	err    error
+	gotIn  ports.DispatchInput
+	called string
+}
+
+func (f *fakeDisp) Dispatch(_ context.Context, id string, in ports.DispatchInput) (ports.DispatchResult, error) {
+	f.gotIn, f.called = in, "dispatch:"+id
+	return f.res, f.err
+}
+func (f *fakeDisp) Retry(_ context.Context, id string) (ports.RetryResult, error) {
+	f.called = "retry:" + id
+	return f.retry, f.err
+}
+func (f *fakeDisp) Resume(_ context.Context, id string) error {
+	f.called = "resume:" + id
+	return f.err
+}
+func (f *fakeDisp) Snapshot(_ context.Context, id string) (ports.DeliverySnapshot, error) {
+	f.called = "snapshot:" + id
+	return f.snap, f.err
+}
+
+var fakeDispatch ports.DispatchUseCase = &fakeDisp{}
+
+func dispRouter(d *fakeDisp) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewCampaignHandler(&fakeCamp{}, fakeDocs{}, d)
+	r.POST("/campaigns/:id/dispatch", h.Dispatch)
+	r.POST("/campaigns/:id/retry", h.Retry)
+	r.POST("/campaigns/:id/resume", h.Resume)
+	r.GET("/campaigns/:id/deliveries", h.Deliveries)
+	return r
+}
+
+func TestDispatchEndpoints(t *testing.T) {
+	d := &fakeDisp{res: ports.DispatchResult{Created: 10, Queued: 8, Skipped: 2}, retry: ports.RetryResult{Requeued: 3, Permanent: 1},
+		snap: ports.DeliverySnapshot{Status: "DISPATCHING", Progress: map[string]ports.ChannelProgress{"whatsapp": {Total: 5}}, Deliveries: []ports.DeliveryView{{Key: "k"}}}}
+	r := dispRouter(d)
+
+	code, out := call(r, "POST", "/campaigns/c1/dispatch", bytes.NewBufferString(`{"channels":["whatsapp"]}`), "application/json")
+	if code != 202 || d.called != "dispatch:c1" || len(d.gotIn.Channels) != 1 || d.gotIn.Channels[0] != "whatsapp" || d.gotIn.By != "operador" ||
+		out["resultado"].(map[string]any)["en_cola"] != float64(8) {
+		t.Errorf("dispatch: %d %v %+v", code, out, d.gotIn)
+	}
+	// Sin cuerpo: todos los canales configurados.
+	d.gotIn = ports.DispatchInput{}
+	if code, _ := call(r, "POST", "/campaigns/c1/dispatch", nil, ""); code != 202 || len(d.gotIn.Channels) != 0 {
+		t.Errorf("sin cuerpo: %d %+v", code, d.gotIn)
+	}
+	if code, _ := call(r, "POST", "/campaigns/c1/dispatch", bytes.NewBufferString(`{roto`), "application/json"); code != 400 {
+		t.Errorf("json roto: %d", code)
+	}
+	if code, out := call(r, "POST", "/campaigns/c1/retry", nil, ""); code != 200 || out["resultado"].(map[string]any)["reencoladas"] != float64(3) || d.called != "retry:c1" {
+		t.Errorf("retry: %d %v", code, out)
+	}
+	if code, _ := call(r, "POST", "/campaigns/c1/resume", nil, ""); code != 200 || d.called != "resume:c1" {
+		t.Errorf("resume: %d", code)
+	}
+	code, out = call(r, "GET", "/campaigns/c1/deliveries", nil, "")
+	if code != 200 || out["status"] != "DISPATCHING" || len(out["entregas"].([]any)) != 1 {
+		t.Errorf("deliveries: %d %v", code, out)
+	}
+	for _, path := range []string{"dispatch", "retry", "resume"} {
+		if code, _ := call(r, "POST", "/campaigns/a:b/"+path, nil, ""); code != 404 {
+			t.Errorf("%s con id inválido: %d", path, code)
+		}
+	}
+	if code, _ := call(r, "GET", "/campaigns/a:b/deliveries", nil, ""); code != 404 {
+		t.Error("deliveries con id inválido")
+	}
+	// Mapeo de errores: mensajes de entrada → 400; ya despachada / pausa / bloqueo → 409; inexistente → 404; interno → 500 sin filtrar.
+	cases := map[int]error{
+		400: &ports.InputError{Message: "No se puede enviar por WhatsApp: el token venció."},
+		409: ports.ErrDispatchRunning, 404: ports.ErrCampaignNotFound, 500: errors.New("redis: password=secreto"),
+	}
+	for want, e := range cases {
+		d.err = e
+		for _, route := range [][2]string{{"POST", "dispatch"}, {"POST", "retry"}, {"POST", "resume"}, {"GET", "deliveries"}} {
+			code, out := call(r, route[0], "/campaigns/c1/"+route[1], nil, "")
+			if code != want {
+				t.Errorf("%s %v → %d, quería %d", route[1], e, code, want)
+			}
+			if want == 500 && strings.Contains(out["error"].(string), "secreto") {
+				t.Error("el error interno no debe filtrarse")
+			}
+		}
+	}
+	d.err = ports.ErrCampaignPaused
+	if code, out := call(r, "POST", "/campaigns/c1/retry", nil, ""); code != 409 || !strings.Contains(out["error"].(string), "pausa") {
+		t.Errorf("pausada: %d %v", code, out)
 	}
 }

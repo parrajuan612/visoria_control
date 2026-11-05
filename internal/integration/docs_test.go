@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -10,6 +11,7 @@ import (
 
 	"visoria-control/internal/adapters/docx"
 	"visoria-control/internal/adapters/libreoffice"
+	"visoria-control/internal/adapters/sheets"
 	"visoria-control/internal/domain"
 	"visoria-control/internal/ports"
 )
@@ -17,6 +19,9 @@ import (
 // Documentos de punta a punta con LibreOffice real: plantilla Word del cliente → docx rellenado en Go
 // → PDF. Se omite si no hay LibreOffice, pdftotext o las plantillas del cliente (que no se versionan).
 //
+// Móvil de prueba del proyecto (E.164 sin "+").
+const telPrueba = "573209323449"
+
 // En esta máquina LibreOffice viene por snap y NO puede leer /tmp: la carpeta de trabajo va dentro del
 // proyecto (visible, no oculta). En un servidor con LibreOffice de apt no hay esa restricción.
 func TestDocumentosConLibreOfficeReal(t *testing.T) {
@@ -93,4 +98,33 @@ func TestDocumentosConLibreOfficeReal(t *testing.T) {
 	}
 	check("PRUEBA MAJESTIC 30", 3, "PRUEBA MAJESTIC 30", "€ 650", "€ 660", "01/02/2027")
 	check("PRUEBA MAJESTIC 70", 2, "PRUEBA MAJESTIC 70", "€ 495", "01/01/2027")
+}
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, _ := os.Getwd()
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		if parent := filepath.Dir(dir); parent != dir {
+			dir = parent
+			continue
+		}
+		t.Fatal("no se encontró go.mod")
+	}
+}
+
+// realConfig es la hoja REAL del cliente (fixture de sheets).
+func realConfig(t *testing.T) domain.MasterConfig {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "internal/adapters/sheets/testdata/informacion_torneos.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, issues := sheets.Parse(bytes.NewReader(data))
+	if domain.HasErrors(issues) || domain.HasErrors(cfg.Validate()) {
+		t.Fatalf("la hoja real debe ser válida: %v", issues)
+	}
+	return cfg
 }

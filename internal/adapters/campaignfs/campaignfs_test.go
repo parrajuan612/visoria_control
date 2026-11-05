@@ -179,3 +179,26 @@ func TestSavePDF(t *testing.T) {
 		}
 	}
 }
+
+func TestReadPDF(t *testing.T) {
+	s, _ := New(t.TempDir())
+	c := camp()
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "x.pdf")
+	os.WriteFile(src, []byte("%PDF-1.4 hola"), 0o600)
+	rel, _, err := s.SavePDF(ctx, c, "r1", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, err := s.ReadPDF(ctx, c, rel); err != nil || string(b) != "%PDF-1.4 hola" {
+		t.Errorf("lectura: %q %v", b, err)
+	}
+	for _, bad := range []string{"", "pdf/../campaign.json", "../x", "/etc/passwd", "pdf/a/b.pdf", `pdf\x.pdf`, "campaign.json", "pdf/"} {
+		if _, err := s.ReadPDF(ctx, c, bad); err == nil {
+			t.Errorf("ruta %q debía rechazarse", bad)
+		}
+	}
+	if _, err := s.ReadPDF(ctx, c, "pdf/no-existe.pdf"); err == nil {
+		t.Error("inexistente")
+	}
+}

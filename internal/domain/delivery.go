@@ -220,6 +220,19 @@ func NewDeliveryKey(campaignID, recipientID string, ch Channel, kind Kind) strin
 	return fmt.Sprintf("%s:%s:%s:%s", campaignID, recipientID, ch, kind)
 }
 
+// ParseDeliveryKey descompone "{campaña}:{destinatario}:{canal}:{tipo}".
+func ParseDeliveryKey(key string) (campaignID, recipientID string, ch Channel, kind Kind, err error) {
+	p := strings.Split(key, ":")
+	if len(p) != 4 || p[0] == "" || p[1] == "" {
+		return "", "", "", "", fmt.Errorf("clave de entrega no válida: %q", key)
+	}
+	ch, kind = Channel(p[2]), Kind(p[3])
+	if ch != ChannelWhatsApp && ch != ChannelEmail {
+		return "", "", "", "", fmt.Errorf("canal desconocido en la clave: %q", p[2])
+	}
+	return p[0], p[1], ch, kind, nil
+}
+
 // NewDelivery crea una entrega en PENDING con su primer evento de historial.
 func NewDelivery(campaignID, recipientID string, ch Channel, kind Kind, at time.Time) Delivery {
 	return Delivery{
@@ -289,4 +302,46 @@ func (d *Delivery) Apply(t Transition) (Outcome, DeliveryStatus) {
 		d.LastError = nil
 	}
 	return out, prev
+}
+
+// StatusLabel es la etiqueta honesta que ve el operador (SDD §6.2). Un correo nunca figura como
+// "Entregado": el protocolo no lo confirma.
+func StatusLabel(ch Channel, s DeliveryStatus) string {
+	switch s {
+	case StatusPending, StatusQueued:
+		return "En cola"
+	case StatusSending:
+		return "Enviando"
+	case StatusRetryWait:
+		return "Reintentando"
+	case StatusAccepted:
+		if ch == ChannelEmail {
+			return "Aceptado por Gmail"
+		}
+		return "Aceptado por WhatsApp"
+	case StatusSent:
+		return "Enviado"
+	case StatusDelivered:
+		return "Entregado"
+	case StatusRead:
+		return "Leído"
+	case StatusFailed:
+		return "No entregado"
+	case StatusUnconfirmed:
+		return "Sin confirmación"
+	case StatusNeedsReview:
+		return "Revisar"
+	case StatusSkipped:
+		return "Omitido"
+	}
+	return string(s)
+}
+
+// IsInFlight indica que la entrega aún no llegó a un estado en el que el sistema termine su trabajo.
+func IsInFlight(s DeliveryStatus) bool {
+	switch s {
+	case StatusPending, StatusQueued, StatusSending, StatusRetryWait:
+		return true
+	}
+	return false
 }

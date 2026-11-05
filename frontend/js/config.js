@@ -101,6 +101,8 @@
                 'En Google Sheets: Archivo → Compartir → Publicar en la web → formato CSV. Si cambias de hoja, la nueva URL se guarda solo cuando es válida.'),
         ])));
 
+        body.append(templatesSection());
+
         if (!cfg.sincronizada) return;
 
         // Hallazgos
@@ -118,6 +120,40 @@
         body.append(section('Categorías por año de nacimiento', table(
             ['Años', 'Categoría', 'Plantilla'],
             cfg.categorias.map(c => [anios(c.anios), c.nombre, c.plantilla || '⚠ sin plantilla']))));
+    }
+
+    // ------------------------------------------------------------ plantillas Word
+    // Las propuestas se generan rellenando estas plantillas. Al subir una nueva se valida que conserve los
+    // campos XXXX/XX/XX/XXXX; si no, NO se cambia y se explica qué falta. La anterior queda guardada.
+    function templatesSection() {
+        const box = el('div', {}, [el('p', { class: 'text-sm text-gray-500' }, 'Cargando plantillas…')]);
+        loadTemplates(box);
+        return section('Plantillas Word de las propuestas', box);
+    }
+
+    async function loadTemplates(box, message) {
+        const r = await listTemplates().catch(() => ({ ok: false, data: {} }));
+        if (!r.ok) { box.replaceChildren(banner('error', 'No se pudieron leer las plantillas.')); return; }
+        const kids = [];
+        if (message) kids.push(message);
+        r.data.templates.forEach(t => {
+            const input = el('input', { type: 'file', accept: '.docx', class: 'text-xs flex-1 min-w-0' });
+            const upload = el('button', { type: 'button', class: 'bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-3 rounded-lg text-xs whitespace-nowrap cursor-pointer disabled:opacity-50' }, t.instalada ? 'Reemplazar' : 'Subir');
+            upload.addEventListener('click', async () => {
+                if (!input.files.length) { loadTemplates(box, banner('warn', `Elige primero el archivo .docx de «${t.nombre}».`)); return; }
+                upload.disabled = true;
+                const res = await installTemplate(t.clave, input.files[0]).catch(() => ({ ok: false, data: { error: 'No se pudo conectar con el servidor.' } }));
+                loadTemplates(box, banner(res.ok ? 'ok' : 'error', res.ok ? res.data.message : (res.data.error || 'No se pudo subir la plantilla.')));
+            });
+            const status = t.instalada
+                ? el('span', { class: 'text-green-700 text-xs font-semibold' }, `Instalada${t.versiones_anteriores ? ` · ${t.versiones_anteriores} versión(es) anterior(es) guardada(s)` : ''}`)
+                : el('span', { class: 'text-red-600 text-xs font-semibold' }, 'FALTA: no se podrán generar propuestas de esta categoría');
+            kids.push(el('div', { class: 'border border-gray-200 rounded-lg p-3 mb-2' }, [
+                el('div', { class: 'flex flex-wrap items-center justify-between gap-2 mb-2' }, [el('span', { class: 'font-medium text-sm' }, t.nombre), status]),
+                el('div', { class: 'flex items-center gap-2' }, [input, upload]),
+            ]));
+        });
+        box.replaceChildren(...kids);
     }
 
     function anios(r) { return r.min === r.max ? String(r.min) : `${r.min}-${r.max}`; }

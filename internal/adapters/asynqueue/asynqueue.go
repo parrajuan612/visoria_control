@@ -96,7 +96,9 @@ func NewWorker(opt asynq.RedisConnOpt, queues []QueueSpec, lg *slog.Logger) *Wor
 // Handle registra el handler de un tipo de tarea.
 func (w *Worker) Handle(taskType string, h ports.TaskHandler) {
 	w.mux.HandleFunc(taskType, func(ctx context.Context, t *asynq.Task) error {
-		err := h(ctx, t.Payload())
+		retried, _ := asynq.GetRetryCount(ctx)
+		maxRetry, _ := asynq.GetMaxRetry(ctx)
+		err := h(ports.WithAttempt(ctx, ports.Attempt{Retried: retried, MaxRetry: maxRetry}), t.Payload())
 		if err != nil && errors.Is(err, ports.ErrSkipRetry) {
 			return fmt.Errorf("%w: %w", err, asynq.SkipRetry)
 		}

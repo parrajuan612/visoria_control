@@ -195,3 +195,29 @@ func (s *Store) SavePDF(_ context.Context, c domain.Campaign, recipientID, src s
 	}
 	return "pdf/" + recipientID + ".pdf", hex.EncodeToString(h.Sum(nil)), nil
 }
+
+const maxPDFBytes = 25 << 20
+
+// ReadPDF lee un PDF ya guardado. La ruta debe ser la devuelta por SavePDF (pdf/{id}.pdf).
+func (s *Store) ReadPDF(_ context.Context, c domain.Campaign, rel string) ([]byte, error) {
+	if !strings.HasPrefix(rel, "pdf/") || strings.Contains(rel, "..") || strings.Count(rel, "/") != 1 || strings.Contains(rel, `\`) {
+		return nil, fmt.Errorf("ruta de PDF no válida: %q", rel)
+	}
+	d, err := s.dir(c)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(filepath.Join(d, rel))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxPDFBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxPDFBytes {
+		return nil, fmt.Errorf("el PDF supera el tamaño máximo")
+	}
+	return data, nil
+}
