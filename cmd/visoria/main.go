@@ -13,6 +13,8 @@ import (
 
 	"visoria-control/internal/adapters/asynqueue"
 	"visoria-control/internal/adapters/redisstore"
+	"visoria-control/internal/adapters/sheets"
+	"visoria-control/internal/app"
 	"visoria-control/internal/platform/config"
 	"visoria-control/internal/platform/log"
 
@@ -65,6 +67,23 @@ func run() int {
 	queue := asynqueue.NewClient(redisOpt)
 	defer queue.Close()
 
+	// Configuración maestra (Google Sheets): se restaura la última válida y, si no hay, se sincroniza.
+	if cfg.SheetsURL != "" {
+		if err := sheets.ValidateGoogleSheetsURL(cfg.SheetsURL); err != nil {
+			slog.Error("SHEETS_CSV_URL no es válida", "error", err)
+			return 1
+		}
+	}
+	tournamentRepo := sheets.NewRepository()
+	cfgSvc := app.NewConfigService(sheets.NewSource(), redisstore.NewConfigStore(rdb), tournamentRepo,
+		cfg.SheetsURL, sheets.ValidateGoogleSheetsURL)
+	restoreCtx, cancelRestore := context.WithTimeout(ctx, 30*time.Second)
+	if err := cfgSvc.Restore(restoreCtx); err != nil {
+		// No impide arrancar: se puede sincronizar luego desde la pantalla de configuración.
+		slog.Warn("configuración maestra no disponible al arrancar", "error", err)
+	}
+	cancelRestore()
+
 	var worker *asynqueue.Worker
 	if roles.Has(RoleWorker) {
 		worker = asynqueue.NewWorker(redisOpt, asynqueue.DefaultQueues, logger)
@@ -86,7 +105,7 @@ func run() int {
 		}
 		r := gin.New()
 		r.Use(RequestLogger(logger), Recovery())
-		SetupRoutes(r, cfg, rdb, queue)
+		SetupRoutes(r, cfg, rdb, queue, tournamentRepo, cfgSvc)
 
 		ln, err := net.Listen("tcp", ":"+cfg.Port)
 		if err != nil {

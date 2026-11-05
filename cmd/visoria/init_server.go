@@ -4,7 +4,6 @@ import (
 	"visoria-control/internal/adapters/chatwoot"
 	httpadapter "visoria-control/internal/adapters/http"
 	"visoria-control/internal/adapters/pdfgen"
-	"visoria-control/internal/adapters/sheets"
 	"visoria-control/internal/adapters/whatsapp"
 	"visoria-control/internal/app"
 	"visoria-control/internal/platform/config"
@@ -17,10 +16,9 @@ import (
 
 // SetupRoutes crea los adaptadores, el servicio y registra las rutas. No arranca el servidor.
 // queue se usará desde la Fase 3/5 (despacho de entregas).
-func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, _ ports.TaskQueue) {
+func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, _ ports.TaskQueue,
+	tournamentRepo ports.TournamentRepository, cfgSvc ports.ConfigUseCase) {
 	// 1. Instanciar Adaptadores (Repositorios y APIs Externas)
-	// Aquí inyectamos el lector de Google Sheets CSV
-	tournamentRepo := sheets.NewCSVTournamentRepository()
 	pdfs := pdfgen.New(pdfgen.PDFDir) // generador y a la vez DocumentStore
 	waAPI := whatsapp.New(cfg.WhatsApp.Token, cfg.WhatsApp.PhoneID, cfg.WhatsApp.APIVersion)
 
@@ -37,5 +35,5 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, _ ports.T
 	handler := httpadapter.NewVisoriaHandler(visoriaService)
 
 	r.GET("/healthz", Healthz(rdb))
-	InitRouter(r, handler, cfg.CORSOrigins)
+	InitRouter(r, handler, httpadapter.NewConfigHandler(cfgSvc), cfg.CORSOrigins)
 }

@@ -22,24 +22,6 @@ func NewVisoriaHandler(s ports.VisoriaService) *VisoriaHandler {
 	return &VisoriaHandler{service: s}
 }
 
-func (h *VisoriaHandler) LoadConfig(c *gin.Context) {
-	var req struct {
-		CsvURL string `json:"csv_url" binding:"required"`
-	}
-
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "URL del CSV es requerida"})
-		return
-	}
-
-	if err := h.service.LoadMasterConfig(c.Request.Context(), req.CsvURL); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Configuración maestra sincronizada con éxito desde Google Sheets"})
-}
-
 func (h *VisoriaHandler) UploadPlayersExcel(c *gin.Context) {
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {

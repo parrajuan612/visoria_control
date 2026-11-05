@@ -23,6 +23,10 @@ type Config struct {
 	// Orígenes CORS permitidos (BASE_URL + localhost + CORS_ALLOWED_ORIGINS).
 	CORSOrigins []string
 
+	// SheetsURL es la hoja publicada (CSV) por defecto. Opcional: el operador puede
+	// enviar otra desde la API (POST /api/v1/config/sync) sin reiniciar.
+	SheetsURL string
+
 	WhatsApp WhatsApp
 	Chatwoot Chatwoot
 	Redis    Redis
@@ -124,10 +128,11 @@ func fromLookup(get func(string) string) (*Config, error) {
 	}
 
 	c := &Config{
-		Env:      str("APP_ENV", "development"),
-		Port:     str("PORT", "8880"),
-		LogLevel: str("LOG_LEVEL", "info"),
-		BaseURL:  strings.TrimRight(required("BASE_URL"), "/"),
+		Env:       str("APP_ENV", "development"),
+		Port:      str("PORT", "8880"),
+		LogLevel:  str("LOG_LEVEL", "info"),
+		BaseURL:   strings.TrimRight(required("BASE_URL"), "/"),
+		SheetsURL: str("SHEETS_CSV_URL", ""),
 		WhatsApp: WhatsApp{
 			Token:      required("WHATSAPP_TOKEN"),
 			PhoneID:    required("WHATSAPP_PHONE_ID"),

@@ -19,16 +19,12 @@ async function goToStep(step) {
         btn.disabled = true;
 
         try {
-            // URL Pública de tu CSV de Google Sheets (Reemplaza si es diferente)
-            const sheetUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTZRPVVDLaG_DrZbuk6FdMdgeATdckx8-juQNgpcdjG5yDpZ0XaVX5MjTMpNi7B5I1R2IUCV3WCdv-B/pub?gid=1182981075&single=true&output=csv";
-            
-            const response = await fetch(`${API_URL}/config/load`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ csv_url: sheetUrl })
-            });
-
-            if (!response.ok) throw new Error("No se pudo conectar con Google Sheets");
+            // La URL de la hoja la gestiona el servidor (entorno o la última guardada).
+            const response = await fetch(`${API_URL}/config/sync`, { method: 'POST' });
+            if (!response.ok) {
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || "No se pudo sincronizar la configuración");
+            }
 
             console.log("Cerebro cargado con éxito.");
         } catch (error) {

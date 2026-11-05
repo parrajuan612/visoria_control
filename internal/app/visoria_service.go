@@ -42,10 +42,6 @@ func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerato
 	}
 }
 
-func (s *visoriaService) LoadMasterConfig(ctx context.Context, csvURL string) error {
-	return s.repo.LoadConfigFromCSV(ctx, csvURL)
-}
-
 func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart.File) ([]domain.Player, error) {
 
 	f, err := excelize.OpenReader(file)

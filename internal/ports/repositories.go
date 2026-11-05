@@ -7,9 +7,10 @@ import (
 	"visoria-control/internal/domain"
 )
 
-// TournamentRepository: configuración maestra (hoy CSV de Google Sheets).
+// TournamentRepository: consulta de la configuración maestra vigente (en memoria).
 type TournamentRepository interface {
-	LoadConfigFromCSV(ctx context.Context, csvURL string) error
+	// Apply reemplaza la configuración vigente por completo.
+	Apply(cfg domain.MasterConfig)
 	GetTournamentForPlayer(ctx context.Context, birthYear int, scholarship string) (domain.TournamentInfo, error)
 }
 

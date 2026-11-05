@@ -43,6 +43,9 @@ func TestDefaultsYNormalizacion(t *testing.T) {
 	if c.Port != "8880" || c.Chatwoot.InboxID != 2 || c.Chatwoot.AccountID != "1" {
 		t.Errorf("defaults inesperados: %+v", c)
 	}
+	if c.SheetsURL != "" {
+		t.Errorf("SheetsURL debe ser opcional: %q", c.SheetsURL)
+	}
 	if c.WhatsAppPause != 6*time.Second {
 		t.Errorf("pausa = %v", c.WhatsAppPause)
 	}

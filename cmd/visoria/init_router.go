@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, allowedOrigins []string) {
+func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *httpadapter.ConfigHandler, allowedOrigins []string) {
 	// CORS restringido a orígenes explícitos (el frontend es same-origin, así que
 	// en producción basta con BASE_URL). Nunca "*" junto con credenciales.
 	r.Use(cors.New(cors.Config{
@@ -27,8 +27,9 @@ func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, allowedOrigi
 
 	v1 := r.Group("/api/v1")
 	{
-		// Configuración
-		v1.POST("/config/load", handler.LoadConfig)
+		// Configuración maestra (Google Sheets)
+		v1.GET("/config", cfgHandler.Get)
+		v1.POST("/config/sync", cfgHandler.Sync)
 
 		// Flujo principal (Wizard)
 		v1.POST("/players/upload", handler.UploadPlayersExcel)
