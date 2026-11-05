@@ -1,9 +1,6 @@
 package main
 
 import (
-	"context"
-	"log/slog"
-	"os"
 	"visoria-control/internal/adapters/chatwoot"
 	httpadapter "visoria-control/internal/adapters/http"
 	"visoria-control/internal/adapters/pdfgen"
@@ -18,9 +15,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// queue se usará desde la Fase 3/5 (despacho de entregas); por ahora solo se verifica su disponibilidad.
-func InitServer(r *gin.Engine, cfg *config.Config, rdb *redis.Client, queue ports.TaskQueue) {
-	_ = queue
+// SetupRoutes crea los adaptadores, el servicio y registra las rutas. No arranca el servidor.
+// queue se usará desde la Fase 3/5 (despacho de entregas).
+func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, _ ports.TaskQueue) {
 	// 1. Instanciar Adaptadores (Repositorios y APIs Externas)
 	// Aquí inyectamos el lector de Google Sheets CSV
 	tournamentRepo := sheets.NewCSVTournamentRepository()
@@ -39,20 +36,6 @@ func InitServer(r *gin.Engine, cfg *config.Config, rdb *redis.Client, queue port
 	// 3. Instanciar Handlers inyectando el servicio
 	handler := httpadapter.NewVisoriaHandler(visoriaService)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	r.Use(func(c *gin.Context) {
-		c.Set("ctx", ctx)
-		c.Next()
-	})
-
 	r.GET("/healthz", Healthz(rdb))
 	InitRouter(r, handler, cfg.CORSOrigins)
-
-	slog.Info("servidor iniciado", "port", cfg.Port, "env", cfg.Env)
-	if err := r.Run(":" + cfg.Port); err != nil {
-		slog.Error("el servidor se detuvo", "error", err)
-		os.Exit(1)
-	}
 }

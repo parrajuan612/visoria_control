@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Redis real para los tests de integración (cola asynq y máquina de estados con Lua).
+    # La política por defecto de Redis ya es noeviction.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      VISORIA_TEST_REDIS_ADDR: 127.0.0.1:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go.mod ordenado
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Archivos sin formatear:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Compilar
+        run: go build ./...
+
+      - name: Tests con detector de carreras
+        run: go test -race -count=1 ./...
+
+      - name: Cobertura mínima de domain (90 %)
+        run: |
+          out=$(go test -count=1 -cover ./internal/domain)
+          echo "$out"
+          pct=$(echo "$out" | sed -nE 's/.*coverage: ([0-9]+)\.[0-9]% of statements.*/\1/p')
+          if [ -z "$pct" ] || [ "$pct" -lt 90 ]; then
+            echo "Cobertura de domain por debajo del 90 %"; exit 1
+          fi
