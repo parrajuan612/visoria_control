@@ -242,7 +242,7 @@ func TestHelpersDeAnios(t *testing.T) {
 	if got := NormalizeText("  ñandú   Ál "); got != "NANDU AL" {
 		t.Errorf("NormalizeText=%q", got)
 	}
-	if becaLabel("50") != "50%" || becaLabel(BecaAcompanante) != "ACOMPAÑANTE" {
+	if BecaLabel("50") != "50%" || BecaLabel(BecaAcompanante) != "ACOMPAÑANTE" {
 		t.Error("becaLabel")
 	}
 	// rangos absurdos no cuelgan el cálculo de cobertura

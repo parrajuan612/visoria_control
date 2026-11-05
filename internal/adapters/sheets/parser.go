@@ -26,13 +26,6 @@ var (
 	aliasCategoria = []string{"CATEGORIA", "CATEGORIAS"}
 )
 
-// normHeader: "PAGO # 1" → "PAGO 1"; "AÑOS" → "ANOS"; "V/TOTAL" se conserva.
-func normHeader(s string) string {
-	s = strings.TrimPrefix(s, "\uFEFF")
-	s = strings.NewReplacer("#", " ", ".", " ", ":", " ", "º", "", "°", "").Replace(s)
-	return domain.NormalizeText(s)
-}
-
 func in(list []string, s string) bool {
 	for _, x := range list {
 		if x == s {
@@ -68,7 +61,7 @@ func findHeader(rows [][]string) (int, columns, bool) {
 		norm := make([]string, len(rows[r]))
 		hasBeca := false
 		for i, cell := range rows[r] {
-			norm[i] = normHeader(cell)
+			norm[i] = domain.NormalizeHeader(cell)
 			if in(aliasBeca, norm[i]) {
 				hasBeca = true
 			}

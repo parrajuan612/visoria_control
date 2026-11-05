@@ -174,6 +174,14 @@ func NormalizeText(s string) string {
 	return strings.Join(strings.FieldsFunc(s, unicode.IsSpace), " ")
 }
 
+// NormalizeHeader normaliza el encabezado de una columna para compararlo con alias:
+// mayúsculas, sin tildes, sin signos ("PAGO # 1" → "PAGO 1", "AÑOS" → "ANOS").
+func NormalizeHeader(s string) string {
+	s = strings.TrimPrefix(s, "\uFEFF")
+	s = strings.NewReplacer("#", " ", ".", " ", ":", " ", "º", "", "°", "", "_", " ", "-", " ").Replace(s)
+	return NormalizeText(s)
+}
+
 // NormalizeBecaKey traduce el nombre de la hoja a una clave: "SIN BECA"→sin_beca,
 // "30%"→"30", "ACOMPAÑANTE"→acompanante.
 func NormalizeBecaKey(nombre string) (BecaKey, bool) {
@@ -259,7 +267,7 @@ func (c MasterConfig) Validate() []Issue {
 	}
 	for _, req := range BecasRequeridas {
 		if _, ok := seen[req]; !ok {
-			add(IssueError, "Becas", "falta la beca %q, que es obligatoria", becaLabel(req))
+			add(IssueError, "Becas", "falta la beca %q, que es obligatoria", BecaLabel(req))
 		}
 	}
 
@@ -327,7 +335,8 @@ func (c MasterConfig) Validate() []Issue {
 	return out
 }
 
-func becaLabel(k BecaKey) string {
+// BecaLabel es el texto de una beca como se muestra: "SIN BECA", "ACOMPAÑANTE" o "30%".
+func BecaLabel(k BecaKey) string {
 	switch k {
 	case BecaSinBeca:
 		return "SIN BECA"
