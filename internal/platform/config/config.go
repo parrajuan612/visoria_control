@@ -46,14 +46,13 @@ type Chatwoot struct {
 	InboxID   int
 }
 
-// Redis es opcional hasta la tarea 1.4 (Enabled=false si REDIS_ADDR está vacío).
+// Redis es obligatorio (cola asynq + estado operativo). La contraseña es
+// obligatoria en producción.
 type Redis struct {
 	Addr     string
 	Password string
 	DB       int
 }
-
-func (r Redis) Enabled() bool { return r.Addr != "" }
 
 // SMTP e IMAP se usarán en la Fase 6 (ADR-9). Son opcionales por ahora.
 type SMTP struct {
@@ -141,7 +140,7 @@ func fromLookup(get func(string) string) (*Config, error) {
 			InboxID:   integer("CHATWOOT_INBOX_ID", 2),
 		},
 		Redis: Redis{
-			Addr:     str("REDIS_ADDR", ""),
+			Addr:     required("REDIS_ADDR"),
 			Password: str("REDIS_PASSWORD", ""),
 			DB:       integer("REDIS_DB", 0),
 		},
@@ -162,6 +161,9 @@ func fromLookup(get func(string) string) (*Config, error) {
 		WhatsAppPause: duration("WHATSAPP_PAUSE", 6*time.Second),
 	}
 
+	if c.Env == "production" && c.Redis.Password == "" {
+		errs = append(errs, errors.New("REDIS_PASSWORD es obligatoria en producción"))
+	}
 	if c.SMTP.Host != "" && (c.SMTP.User == "" || c.SMTP.AppPassword == "") {
 		errs = append(errs, errors.New("SMTP_HOST definido pero faltan SMTP_USER o SMTP_APP_PASSWORD"))
 	}

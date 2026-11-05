@@ -8,7 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"visoria-control/internal/adapters/asynqueue"
+	"visoria-control/internal/adapters/redisstore"
 	"visoria-control/internal/platform/config"
 	"visoria-control/internal/platform/log"
 
@@ -37,17 +40,42 @@ func main() {
 	logger := log.Setup(log.ParseLevel(cfg.LogLevel))
 	slog.Info("roles activos", "roles", roles.String())
 
-	// worker y scheduler se activan en la tarea 1.4 (Redis + asynq).
-	for _, r := range []Role{RoleWorker, RoleScheduler} {
-		if roles.Has(r) {
-			slog.Info("rol aún sin implementación; se activará con asynq (Fase 1.4)", "role", string(r))
+	// Redis es obligatorio: cola, estados y SSE dependen de él. Se verifica noeviction/AOF.
+	rdb := redisstore.New(cfg.Redis)
+	defer rdb.Close()
+	startCtx, cancelStart := context.WithTimeout(context.Background(), 10*time.Second)
+	warnings, err := redisstore.Verify(startCtx, rdb)
+	cancelStart()
+	if err != nil {
+		slog.Error("redis no está listo", "error", err)
+		os.Exit(1)
+	}
+	for _, w := range warnings {
+		slog.Warn(w)
+	}
+	redisOpt := asynqueue.RedisOpt(cfg.Redis.Addr, cfg.Redis.Password, cfg.Redis.DB)
+	queue := asynqueue.NewClient(redisOpt)
+	defer queue.Close()
+
+	if roles.Has(RoleWorker) {
+		worker := asynqueue.NewWorker(redisOpt, asynqueue.DefaultQueues, logger)
+		registerHandlers(worker, logger)
+		if err := worker.Start(); err != nil {
+			slog.Error("no se pudo iniciar el worker", "error", err)
+			os.Exit(1)
 		}
+		defer worker.Shutdown() // cierre ordenado completo (SIGTERM con la API): tarea 1.6
+		slog.Info("worker iniciado", "queues", len(asynqueue.DefaultQueues))
+	}
+	if roles.Has(RoleScheduler) {
+		slog.Info("rol scheduler sin tareas periódicas todavía (se agregan con imap:poll, cfg:sync, recordatorios)")
 	}
 
 	if !roles.Has(RoleAPI) {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		<-ctx.Done()
+		slog.Info("señal recibida, cerrando")
 		return
 	}
 
@@ -56,5 +84,5 @@ func main() {
 	}
 	r := gin.New()
 	r.Use(RequestLogger(logger), Recovery())
-	InitServer(r, cfg)
+	InitServer(r, cfg, rdb, queue)
 }

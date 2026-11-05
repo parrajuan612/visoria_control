@@ -16,6 +16,7 @@ func validEnv() map[string]string {
 		"WHATSAPP_TOKEN":     "tok",
 		"WHATSAPP_PHONE_ID":  "123",
 		"CHATWOOT_API_TOKEN": "cw",
+		"REDIS_ADDR":         "127.0.0.1:6380",
 	}
 }
 
@@ -24,7 +25,7 @@ func TestFaltanObligatorias(t *testing.T) {
 	if err == nil {
 		t.Fatal("se esperaba error")
 	}
-	for _, k := range []string{"BASE_URL", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID", "CHATWOOT_API_TOKEN"} {
+	for _, k := range []string{"BASE_URL", "WHATSAPP_TOKEN", "WHATSAPP_PHONE_ID", "CHATWOOT_API_TOKEN", "REDIS_ADDR"} {
 		if !strings.Contains(err.Error(), k) {
 			t.Errorf("el error debe mencionar %s: %v", k, err)
 		}
@@ -45,8 +46,8 @@ func TestDefaultsYNormalizacion(t *testing.T) {
 	if c.WhatsAppPause != 6*time.Second {
 		t.Errorf("pausa = %v", c.WhatsAppPause)
 	}
-	if c.Redis.Enabled() || c.SMTP.Enabled() {
-		t.Error("Redis y SMTP deben estar deshabilitados por defecto")
+	if c.Redis.Addr != "127.0.0.1:6380" || c.SMTP.Enabled() {
+		t.Errorf("Redis/SMTP inesperados: %+v %+v", c.Redis, c.SMTP)
 	}
 }
 
@@ -77,5 +78,17 @@ func TestValoresInvalidos(t *testing.T) {
 		if !strings.Contains(err.Error(), s) {
 			t.Errorf("falta %s en: %v", s, err)
 		}
+	}
+}
+
+func TestRedisPasswordObligatoriaEnProduccion(t *testing.T) {
+	e := validEnv()
+	e["APP_ENV"] = "production"
+	if _, err := fromLookup(lookup(e)); err == nil || !strings.Contains(err.Error(), "REDIS_PASSWORD") {
+		t.Fatalf("debía exigir REDIS_PASSWORD: %v", err)
+	}
+	e["REDIS_PASSWORD"] = "x"
+	if _, err := fromLookup(lookup(e)); err != nil {
+		t.Fatal(err)
 	}
 }

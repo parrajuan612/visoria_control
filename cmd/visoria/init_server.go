@@ -12,11 +12,15 @@ import (
 	"visoria-control/internal/app"
 	"visoria-control/internal/platform/config"
 	"visoria-control/internal/platform/httpx"
+	"visoria-control/internal/ports"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
-func InitServer(r *gin.Engine, cfg *config.Config) {
+// queue se usará desde la Fase 3/5 (despacho de entregas); por ahora solo se verifica su disponibilidad.
+func InitServer(r *gin.Engine, cfg *config.Config, rdb *redis.Client, queue ports.TaskQueue) {
+	_ = queue
 	// 1. Instanciar Adaptadores (Repositorios y APIs Externas)
 	// Aquí inyectamos el lector de Google Sheets CSV
 	tournamentRepo := sheets.NewCSVTournamentRepository()
@@ -43,6 +47,7 @@ func InitServer(r *gin.Engine, cfg *config.Config) {
 		c.Next()
 	})
 
+	r.GET("/healthz", Healthz(rdb))
 	InitRouter(r, handler, cfg.CORSOrigins)
 
 	slog.Info("servidor iniciado", "port", cfg.Port, "env", cfg.Env)
