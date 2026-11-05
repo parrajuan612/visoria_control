@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"visoria-control/internal/platform/httpx"
+	"visoria-control/internal/platform/log"
 
 	"visoria-control/internal/core/domain"
 )
@@ -26,7 +28,11 @@ func NewCSVTournamentRepository() *csvTournamentRepository {
 }
 
 func (r *csvTournamentRepository) LoadConfigFromCSV(ctx context.Context, csvURL string) error {
-	resp, err := http.Get(csvURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, csvURL, nil)
+	if err != nil {
+		return fmt.Errorf("URL de CSV inválida: %v", err)
+	}
+	resp, err := httpx.New(httpx.LongTimeout).Do(req)
 	if err != nil {
 		return fmt.Errorf("error descargando CSV: %v", err)
 	}
@@ -94,8 +100,8 @@ func (r *csvTournamentRepository) LoadConfigFromCSV(ctx context.Context, csvURL 
 		}
 	}
 
-	// Imprimimos en la terminal para estar 100% seguros de que se cargó todo
-	fmt.Printf("✅ Cerebro Sincronizado: %d Becas, %d Torneos, %d Categorias\n", len(r.mapaBecas), len(r.listaTorneos), len(r.listaCategorias))
+	log.FromContext(ctx).Info("configuración sincronizada",
+		"becas", len(r.mapaBecas), "torneos", len(r.listaTorneos), "categorias", len(r.listaCategorias))
 
 	return nil
 }

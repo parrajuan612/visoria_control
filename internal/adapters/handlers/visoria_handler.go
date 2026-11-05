@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"visoria-control/internal/platform/log"
 
 	"visoria-control/internal/core/domain"
 	"visoria-control/internal/core/ports"
@@ -101,12 +102,16 @@ func (h *VisoriaHandler) SendWhatsApp(c *gin.Context) {
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 
+	// Contexto desacoplado de la petición (el envío sigue aunque cierren la pestaña)
+	// pero conserva el logger con request_id.
+	bgCtx := log.WithContext(context.Background(), log.FromContext(c.Request.Context()))
+
 	progressChan := make(chan string)
 
 	// Ejecutamos el envío en segundo plano
 	go func() {
 		defer close(progressChan)
-		err := h.service.DispatchWhatsAppMessages(context.Background(), req.Players, progressChan)
+		err := h.service.DispatchWhatsAppMessages(bgCtx, req.Players, progressChan)
 		if err != nil {
 			progressChan <- fmt.Sprintf("❌ Error fatal: %v", err)
 		}

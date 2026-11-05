@@ -16,9 +16,10 @@ import (
 )
 
 type Config struct {
-	Env     string // development | production
-	Port    string
-	BaseURL string // URL pública, sin "/" final
+	Env      string // development | production
+	Port     string
+	LogLevel string // debug|info|warn|error
+	BaseURL  string // URL pública, sin "/" final
 	// Orígenes CORS permitidos (BASE_URL + localhost + CORS_ALLOWED_ORIGINS).
 	CORSOrigins []string
 
@@ -124,9 +125,10 @@ func fromLookup(get func(string) string) (*Config, error) {
 	}
 
 	c := &Config{
-		Env:     str("APP_ENV", "development"),
-		Port:    str("PORT", "8880"),
-		BaseURL: strings.TrimRight(required("BASE_URL"), "/"),
+		Env:      str("APP_ENV", "development"),
+		Port:     str("PORT", "8880"),
+		LogLevel: str("LOG_LEVEL", "info"),
+		BaseURL:  strings.TrimRight(required("BASE_URL"), "/"),
 		WhatsApp: WhatsApp{
 			Token:      required("WHATSAPP_TOKEN"),
 			PhoneID:    required("WHATSAPP_PHONE_ID"),

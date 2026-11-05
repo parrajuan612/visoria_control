@@ -15,6 +15,8 @@ import (
 
 	"visoria-control/internal/core/domain"
 	"visoria-control/internal/core/ports"
+	"visoria-control/internal/platform/httpx"
+	"visoria-control/internal/platform/log"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -35,6 +37,7 @@ type visoriaService struct {
 	pdfGen ports.PDFGenerator
 	waAPI  ports.WhatsAppAPI
 	opts   Options
+	httpc  *http.Client // cliente compartido con timeout (Chatwoot)
 }
 
 func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, waAPI ports.WhatsAppAPI, opts Options) ports.VisoriaService {
@@ -43,6 +46,7 @@ func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerato
 		pdfGen: pdfGen,
 		waAPI:  waAPI,
 		opts:   opts,
+		httpc:  httpx.New(httpx.ShortTimeout),
 	}
 }
 
@@ -157,7 +161,7 @@ func (s *visoriaService) GenerateDocuments(ctx context.Context, players []domain
 
 		path, err := s.pdfGen.Generate(p, p.Tournament)
 		if err != nil {
-			fmt.Printf("Error generando PDF para %s: %v\n", p.Name, err)
+			log.FromContext(ctx).Error("error generando PDF", "file_id", p.FileID, "error", err)
 			continue
 		}
 		generatedPaths = append(generatedPaths, path)
@@ -167,6 +171,7 @@ func (s *visoriaService) GenerateDocuments(ctx context.Context, players []domain
 }
 
 func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players []domain.Player, progressChan chan<- string) error {
+	lg := log.FromContext(ctx)
 	for i, p := range players {
 		if p.Status != "PENDING" {
 			progressChan <- fmt.Sprintf("⚠️ Omitido %s: datos inválidos (%s)", p.Name, p.Status)
@@ -188,7 +193,7 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 		}
 
 		msgInicio := fmt.Sprintf("[%d/%d] Enviando WhatsApp a %s...", i+1, len(players), p.Name)
-		fmt.Println(msgInicio)
+		lg.Info("enviando whatsapp", "file_id", p.FileID, "index", i+1, "total", len(players))
 		progressChan <- msgInicio
 
 		becaNum := strings.ReplaceAll(p.Scholarship, "%", "")
@@ -220,24 +225,24 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 		}
 
 		// 1. Envío de plantilla oficial por Meta API
-		err := s.waAPI.SendTemplate(context.Background(), phone, "purchase_receipt_3", "es_CO", components)
+		err := s.waAPI.SendTemplate(ctx, phone, "purchase_receipt_3", "es_CO", components)
 
 		if err != nil {
 			msgErr := fmt.Sprintf("❌ Error enviando a %s: %v", p.Name, err)
-			fmt.Println(msgErr)
+			lg.Error("fallo envío whatsapp", "file_id", p.FileID, "error", err)
 			progressChan <- msgErr
 		} else {
 			msgOk := fmt.Sprintf("✅ Mensaje enviado a %s", p.Name)
-			fmt.Println(msgOk)
+			lg.Info("whatsapp aceptado por Meta", "file_id", p.FileID)
 			progressChan <- msgOk
 
 			// 2. Notificación y autorregistro en Chatwoot
 			textoRegistro := fmt.Sprintf("📄 *Beca enviada por sistema*\n\nHola %s,\nTe hacemos entrega del documento oficial correspondiente a la beca del %s%% asignada a %s.\n\nPDF: %s", p.GuardianName, becaNum, p.Name, pdfURL)
 
 			if errCw := s.registrarEnChatwoot(phone, p.Name, textoRegistro); errCw != nil {
-				fmt.Printf("⚠️ Mensaje enviado por WhatsApp pero no se registró en Chatwoot (%s): %v\n", p.Name, errCw)
+				lg.Warn("whatsapp enviado pero no registrado en Chatwoot", "file_id", p.FileID, "error", errCw)
 			} else {
-				fmt.Printf("💬 Copia del mensaje registrada con éxito en Chatwoot para %s\n", p.Name)
+				lg.Info("nota registrada en Chatwoot", "file_id", p.FileID)
 			}
 		}
 
@@ -254,7 +259,7 @@ func (s *visoriaService) registrarEnChatwoot(phone string, playerName string, me
 	accountID := s.opts.ChatwootAccount
 	inboxID := s.opts.ChatwootInbox
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := s.httpc
 
 	// 1. Buscar contacto por número telefónico
 	searchURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/search?q=%s", chatwootURL, accountID, phone)
@@ -308,7 +313,7 @@ func (s *visoriaService) registrarEnChatwoot(phone string, playerName string, me
 			return fmt.Errorf("error leyendo respuesta de Chatwoot: %w", errRead)
 		}
 
-		fmt.Printf("🔍 [DEBUG CHATWOOT] Status: %d | Response: %s\n", respCreate.StatusCode, string(respBodyBytes))
+		log.FromContext(context.Background()).Debug("chatwoot: crear contacto", "status", respCreate.StatusCode)
 
 		if respCreate.StatusCode >= 400 {
 			return fmt.Errorf("chatwoot rechazó la creación (HTTP %d): %s", respCreate.StatusCode, string(respBodyBytes))

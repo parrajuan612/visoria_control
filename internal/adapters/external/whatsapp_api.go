@@ -8,12 +8,14 @@ import (
 	"net/http"
 
 	"visoria-control/internal/core/ports"
+	"visoria-control/internal/platform/httpx"
 )
 
 type whatsappAPI struct {
 	accessToken   string
 	phoneNumberID string // ¡OJO! Este es el Phone Number ID, no el WABA ID
 	apiVersion    string
+	client        *http.Client
 }
 
 func NewWhatsAppAPI(accessToken, phoneNumberID, apiVersion string) ports.WhatsAppAPI {
@@ -21,6 +23,7 @@ func NewWhatsAppAPI(accessToken, phoneNumberID, apiVersion string) ports.WhatsAp
 		accessToken:   accessToken,
 		phoneNumberID: phoneNumberID,
 		apiVersion:    apiVersion,
+		client:        httpx.New(httpx.LongTimeout),
 	}
 }
 
@@ -55,8 +58,7 @@ func (w *whatsappAPI) SendTemplate(ctx context.Context, phone string, templateNa
 	req.Header.Set("Authorization", "Bearer "+w.accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := w.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("error ejecutando petición HTTP a Meta: %w", err)
 	}
