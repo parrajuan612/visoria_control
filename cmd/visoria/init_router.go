@@ -7,12 +7,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *httpadapter.ConfigHandler, campHandler *httpadapter.CampaignHandler, allowedOrigins []string) {
+func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *httpadapter.ConfigHandler, campHandler *httpadapter.CampaignHandler, tplHandler *httpadapter.TemplateHandler, allowedOrigins []string) {
 	// CORS restringido a orígenes explícitos (el frontend es same-origin, así que
 	// en producción basta con BASE_URL). Nunca "*" junto con credenciales.
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     allowedOrigins,
-		AllowMethods:     []string{"POST", "GET", "PATCH", "OPTIONS"},
+		AllowMethods:     []string{"POST", "GET", "PATCH", "PUT", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
 	}))
@@ -37,6 +37,11 @@ func InitRouter(r *gin.Engine, handler *httpadapter.VisoriaHandler, cfgHandler *
 		v1.GET("/campaigns/:id", campHandler.Get)
 		v1.GET("/campaigns/:id/players", campHandler.Players)
 		v1.PATCH("/campaigns/:id/recipients/:rid", campHandler.EditRecipient)
+		v1.POST("/campaigns/:id/documents", campHandler.Documents)
+
+		// Plantillas Word
+		v1.GET("/templates", tplHandler.List)
+		v1.PUT("/templates/:key", tplHandler.Install)
 
 		// Flujo principal (Wizard)
 		v1.POST("/players/upload", handler.UploadPlayersExcel)

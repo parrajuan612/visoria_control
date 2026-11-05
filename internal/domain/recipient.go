@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 // RecipientState es el estado de validación de una fila del Excel.
 type RecipientState string
 
@@ -39,6 +41,37 @@ type Recipient struct {
 	Estado    RecipientState `json:"estado"`
 	Editado   bool           `json:"editado"` // true si se corrigió en pantalla (auditado)
 	Raw       RawRow         `json:"raw"`     // celdas tal como están (originales o ya corregidas)
+	// Documento es la propuesta generada (nil = aún no se generó o quedó obsoleta por una edición).
+	Documento *Document `json:"documento,omitempty"`
+}
+
+// Document es el PDF de la propuesta de un destinatario.
+type Document struct {
+	Path        string    `json:"path,omitempty"`   // relativo a la carpeta de la campaña: pdf/{id}.pdf
+	SHA256      string    `json:"sha256,omitempty"` // huella del PDF
+	GeneratedAt time.Time `json:"generado_en"`
+	// Error es el motivo si no se pudo generar (mensaje del cliente: «Quedaron campos XXX…», etc.).
+	Error string `json:"error,omitempty"`
+}
+
+// HasDocument indica que el PDF existe y se puede enviar.
+func (r Recipient) HasDocument() bool {
+	return r.Documento != nil && r.Documento.Error == "" && r.Documento.Path != ""
+}
+
+// CanDispatch: solo una fila VÁLIDA con su PDF generado puede recibir entregas (SDD §4.4: un
+// destinatario sin PDF no puede tener entregas encoladas).
+func (r Recipient) CanDispatch() bool { return r.Estado == RecipientValid && r.HasDocument() }
+
+// PendingDocuments son las filas válidas que todavía no tienen un intento de documento.
+func PendingDocuments(recs []Recipient) []Recipient {
+	var out []Recipient
+	for _, r := range recs {
+		if r.Estado == RecipientValid && r.Documento == nil {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // HasWhatsApp / HasEmail indican qué canales tiene datos válidos.

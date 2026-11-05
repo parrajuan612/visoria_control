@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -69,6 +70,22 @@ func (m *memRepo) Recipients(_ context.Context, id string) ([]domain.Recipient, 
 	sort.Slice(out, func(i, j int) bool { return out[i].Fila < out[j].Fila })
 	return out, nil
 }
+func (m *memRepo) SetStatus(_ context.Context, id string, from []domain.CampaignStatus, to domain.CampaignStatus) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	c, ok := m.camps[id]
+	if !ok {
+		return false, ports.ErrCampaignNotFound
+	}
+	for _, f := range from {
+		if c.Status == f {
+			c.Status = to
+			m.camps[id] = c
+			return true, nil
+		}
+	}
+	return false, nil
+}
 func (m *memRepo) SaveRecipients(_ context.Context, id string, ch []domain.Recipient, sum domain.BatchSummary) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -92,6 +109,8 @@ type memFiles struct {
 	events   []domain.AuditEvent
 	failAud  error
 	failOrig error
+	pdfs     map[string][]byte
+	failPDF  map[string]error
 }
 
 func newMemFiles() *memFiles { return &memFiles{original: map[string][]byte{}} }
@@ -101,6 +120,22 @@ func (f *memFiles) SaveOriginal(_ context.Context, c domain.Campaign, d []byte) 
 	}
 	f.original[c.ID] = d
 	return nil
+}
+func (f *memFiles) SavePDF(_ context.Context, c domain.Campaign, rid, src string) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failPDF[rid] != nil {
+		return "", "", f.failPDF[rid]
+	}
+	b, err := os.ReadFile(src)
+	if err != nil {
+		return "", "", err
+	}
+	if f.pdfs == nil {
+		f.pdfs = map[string][]byte{}
+	}
+	f.pdfs[rid] = b
+	return "pdf/" + rid + ".pdf", "sha-" + rid, nil
 }
 func (f *memFiles) SaveSnapshot(context.Context, domain.Campaign) error { f.snaps++; return nil }
 func (f *memFiles) Audit(_ context.Context, _ domain.Campaign, e domain.AuditEvent) error {

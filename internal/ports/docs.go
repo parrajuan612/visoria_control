@@ -50,3 +50,11 @@ type ConvertError struct {
 func (e *ConvertError) Error() string {
 	return "no se pudo convertir a PDF: " + strings.Join(e.Failed, ", ")
 }
+
+// Workspace da carpetas de trabajo temporales para generar documentos (el núcleo no toca el disco).
+type Workspace interface {
+	// Open crea una carpeta temporal y devuelve su ruta y la función que la borra con todo su contenido.
+	Open() (dir string, cleanup func(), err error)
+	// WriteFile escribe un archivo (solo el propietario puede leerlo: trae datos de menores).
+	WriteFile(path string, data []byte) error
+}

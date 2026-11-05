@@ -31,10 +31,11 @@ var reID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 type CampaignHandler struct {
 	uc     ports.CampaignUseCase
 	legacy ports.VisoriaService
+	docs   ports.DocumentUseCase
 }
 
-func NewCampaignHandler(uc ports.CampaignUseCase, legacy ports.VisoriaService) *CampaignHandler {
-	return &CampaignHandler{uc: uc, legacy: legacy}
+func NewCampaignHandler(uc ports.CampaignUseCase, legacy ports.VisoriaService, docs ports.DocumentUseCase) *CampaignHandler {
+	return &CampaignHandler{uc: uc, legacy: legacy, docs: docs}
 }
 
 // fail traduce los errores de la aplicación a respuestas HTTP. Los errores internos no se
@@ -47,7 +48,7 @@ func (h *CampaignHandler) fail(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": ie.Message})
 	case errors.As(err, &tooBig):
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "El archivo supera el tamaño máximo de 10 MB."})
-	case errors.Is(err, ports.ErrNoConfig), errors.Is(err, ports.ErrCampaignLocked):
+	case errors.Is(err, ports.ErrNoConfig), errors.Is(err, ports.ErrCampaignLocked), errors.Is(err, ports.ErrGenerationRunning):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, ports.ErrInvalidSpreadsheet):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
@@ -194,4 +195,25 @@ func (h *CampaignHandler) Players(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": h.legacy.ToPlayers(c.Request.Context(), detail.Recipients), "resumen": detail.Campaign.Resumen})
+}
+
+// Documents: POST /api/v1/campaigns/:id/documents — encola la generación de las propuestas (PDF).
+//
+//	202 → encolada (el progreso se ve en cada fila: «documento», y en el stream de eventos)
+//	200 → no hay nada por generar · 400 → falta una plantilla · 409 → ya se genera / campaña bloqueada
+func (h *CampaignHandler) Documents(c *gin.Context) {
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	res, err := h.docs.Generate(c.Request.Context(), id)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	if res.Queued == 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "Todas las propuestas ya están generadas.", "resultado": res})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": "Generando las propuestas.", "resultado": res})
 }

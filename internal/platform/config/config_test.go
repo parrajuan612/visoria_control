@@ -107,3 +107,21 @@ func TestDataDir(t *testing.T) {
 		t.Errorf("DATA_DIR = %q", c.DataDir)
 	}
 }
+
+func TestDocs(t *testing.T) {
+	c, err := fromLookup(lookup(validEnv()))
+	if err != nil || c.Docs.BatchSize != 25 || c.Docs.Timeout != 10*time.Minute || c.Docs.SofficePath != "" || c.Docs.WorkDir != "" {
+		t.Fatalf("por defecto (SDD: lote 25, plazo 10 min): %+v %v", c.Docs, err)
+	}
+	e := validEnv()
+	e["SOFFICE_PATH"], e["DOCS_BATCH_SIZE"], e["DOCS_TIMEOUT"], e["DOCS_WORKDIR"] = "/usr/bin/soffice", "10", "3m", "/var/tmp/docs"
+	if c, err = fromLookup(lookup(e)); err != nil || c.Docs.BatchSize != 10 || c.Docs.Timeout != 3*time.Minute || c.Docs.SofficePath != "/usr/bin/soffice" || c.Docs.WorkDir != "/var/tmp/docs" {
+		t.Errorf("valores: %+v %v", c.Docs, err)
+	}
+	for _, bad := range []string{"0", "101", "x"} {
+		e["DOCS_BATCH_SIZE"] = bad
+		if _, err := fromLookup(lookup(e)); err == nil || !strings.Contains(err.Error(), "DOCS_BATCH_SIZE") {
+			t.Errorf("DOCS_BATCH_SIZE=%q debía fallar: %v", bad, err)
+		}
+	}
+}

@@ -12,6 +12,8 @@ var (
 	ErrRecipientNotFound = errors.New("destinatario no encontrado")
 	// ErrCampaignLocked: la campaña ya no admite correcciones (se está enviando o terminó).
 	ErrCampaignLocked = errors.New("la campaña ya no se puede editar")
+	// ErrGenerationRunning: ya se están generando las propuestas de la campaña.
+	ErrGenerationRunning = errors.New("Ya se están generando las propuestas de esta campaña.")
 )
 
 // InputError es un dato de entrada inválido; su mensaje es para mostrarlo al usuario tal cual.
@@ -30,6 +32,9 @@ type CampaignRepo interface {
 	Recipients(ctx context.Context, id string) ([]domain.Recipient, error)
 	// SaveRecipients reemplaza solo los destinatarios indicados y actualiza el resumen.
 	SaveRecipients(ctx context.Context, id string, changed []domain.Recipient, summary domain.BatchSummary) error
+	// SetStatus cambia el estado solo si el actual está en "from" (compara y cambia de forma atómica).
+	// Devuelve false si no se cambió.
+	SetStatus(ctx context.Context, id string, from []domain.CampaignStatus, to domain.CampaignStatus) (bool, error)
 }
 
 // CampaignFiles escribe los artefactos y la auditoría de una campaña en disco (SDD §3.6.2).
@@ -37,6 +42,9 @@ type CampaignFiles interface {
 	SaveOriginal(ctx context.Context, c domain.Campaign, data []byte) error  // EXCEL_ORIGINAL.xlsx
 	SaveSnapshot(ctx context.Context, c domain.Campaign) error               // campaign.json (con la configuración)
 	Audit(ctx context.Context, c domain.Campaign, e domain.AuditEvent) error // events.jsonl, solo agrega
+	// SavePDF guarda el PDF de un destinatario en pdf/{id}.pdf (copia desde src) y devuelve su ruta
+	// relativa y su SHA-256. Rechaza archivos vacíos o que no sean PDF.
+	SavePDF(ctx context.Context, c domain.Campaign, recipientID, src string) (rel, sha256 string, err error)
 }
 
 // CreateCampaignInput son los datos para crear una campaña desde el Excel.

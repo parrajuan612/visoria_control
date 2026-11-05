@@ -53,7 +53,7 @@ func (r *CampaignRepo) Create(ctx context.Context, c domain.Campaign, recs []dom
 	}
 	// MULTI/EXEC: la campaña aparece completa o no aparece.
 	_, err = r.rdb.TxPipelined(ctx, func(p redis.Pipeliner) error {
-		p.HSet(ctx, campaignKey(c.ID), "meta", meta, "config", cfg, "summary", summary)
+		p.HSet(ctx, campaignKey(c.ID), "meta", meta, "config", cfg, "summary", summary, "status", string(c.Status))
 		if len(fields) > 0 {
 			p.HSet(ctx, recipientsKey(c.ID), fields)
 		}
@@ -82,7 +82,7 @@ func decodeMeta(raw, cfg string) (domain.Campaign, error) {
 }
 
 func (r *CampaignRepo) Get(ctx context.Context, id string) (domain.Campaign, error) {
-	vals, err := r.rdb.HMGet(ctx, campaignKey(id), "meta", "config").Result()
+	vals, err := r.rdb.HMGet(ctx, campaignKey(id), "meta", "config", "status").Result()
 	if err != nil {
 		return domain.Campaign{}, fmt.Errorf("leyendo la campaña: %w", err)
 	}
@@ -91,7 +91,14 @@ func (r *CampaignRepo) Get(ctx context.Context, id string) (domain.Campaign, err
 		return domain.Campaign{}, ports.ErrCampaignNotFound
 	}
 	cfg, _ := vals[1].(string)
-	return decodeMeta(meta, cfg)
+	c, err := decodeMeta(meta, cfg)
+	if err != nil {
+		return domain.Campaign{}, err
+	}
+	if st, _ := vals[2].(string); st != "" { // el estado vigente vive en su propio campo
+		c.Status = domain.CampaignStatus(st)
+	}
+	return c, nil
 }
 
 func (r *CampaignRepo) List(ctx context.Context, limit int) ([]domain.CampaignView, error) {
@@ -102,7 +109,7 @@ func (r *CampaignRepo) List(ctx context.Context, limit int) ([]domain.CampaignVi
 	pipe := r.rdb.Pipeline()
 	cmds := make([]*redis.SliceCmd, len(ids))
 	for i, id := range ids {
-		cmds[i] = pipe.HMGet(ctx, campaignKey(id), "meta", "summary") // sin la configuración: es pesada
+		cmds[i] = pipe.HMGet(ctx, campaignKey(id), "meta", "summary", "status") // sin la configuración: es pesada
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		return nil, fmt.Errorf("listando campañas: %w", err)
@@ -117,6 +124,9 @@ func (r *CampaignRepo) List(ctx context.Context, limit int) ([]domain.CampaignVi
 		c, err := decodeMeta(meta, "")
 		if err != nil {
 			return nil, err
+		}
+		if st, _ := vals[2].(string); st != "" {
+			c.Status = domain.CampaignStatus(st)
 		}
 		v := domain.CampaignView{Campaign: c}
 		if s, _ := vals[1].(string); s != "" {
@@ -171,4 +181,36 @@ func (r *CampaignRepo) SaveRecipients(ctx context.Context, id string, changed []
 		return fmt.Errorf("guardando destinatarios: %w", err)
 	}
 	return nil
+}
+
+// setStatusLua: cambia el estado solo si el actual está entre los permitidos (ARGV[2..]).
+// Una campaña antigua sin campo "status" se considera DRAFT.
+var setStatusScript = redis.NewScript(`
+local cur = redis.call('HGET', KEYS[1], 'status')
+if not cur then
+  if redis.call('EXISTS', KEYS[1]) == 0 then return -1 end
+  cur = 'DRAFT'
+end
+for i = 2, #ARGV do
+  if ARGV[i] == cur then
+    redis.call('HSET', KEYS[1], 'status', ARGV[1])
+    return 1
+  end
+end
+return 0
+`)
+
+func (r *CampaignRepo) SetStatus(ctx context.Context, id string, from []domain.CampaignStatus, to domain.CampaignStatus) (bool, error) {
+	args := []any{string(to)}
+	for _, f := range from {
+		args = append(args, string(f))
+	}
+	n, err := setStatusScript.Run(ctx, r.rdb, []string{campaignKey(id)}, args...).Int()
+	if err != nil {
+		return false, fmt.Errorf("cambiando el estado de la campaña: %w", err)
+	}
+	if n < 0 {
+		return false, ports.ErrCampaignNotFound
+	}
+	return n == 1, nil
 }

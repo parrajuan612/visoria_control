@@ -9,11 +9,15 @@ package campaignfs
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -136,4 +140,58 @@ func (s *Store) Audit(_ context.Context, c domain.Campaign, e domain.AuditEvent)
 		return err
 	}
 	return f.Close()
+}
+
+var reRecipientID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// SavePDF copia el PDF a pdf/{id}.pdf (atómico) y devuelve su ruta relativa y su SHA-256.
+// El nombre interno es el ID estable del destinatario; el nombre visible se calcula al adjuntar.
+func (s *Store) SavePDF(_ context.Context, c domain.Campaign, recipientID, src string) (string, string, error) {
+	if !reRecipientID.MatchString(recipientID) {
+		return "", "", fmt.Errorf("ID de destinatario no válido: %q", recipientID)
+	}
+	d, err := s.dir(c)
+	if err != nil {
+		return "", "", err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return "", "", err
+	}
+	defer in.Close()
+	head := make([]byte, 5)
+	if n, _ := io.ReadFull(in, head); n < 5 || string(head) != "%PDF-" {
+		return "", "", fmt.Errorf("el archivo generado no es un PDF válido")
+	}
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		return "", "", err
+	}
+	dstDir := filepath.Join(d, "pdf")
+	if err := os.MkdirAll(dstDir, dirMode); err != nil {
+		return "", "", err
+	}
+	tmp, err := os.CreateTemp(dstDir, ".tmp-*")
+	if err != nil {
+		return "", "", err
+	}
+	defer os.Remove(tmp.Name())
+	h := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmp, h), in); err != nil {
+		tmp.Close()
+		return "", "", err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return "", "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", "", err
+	}
+	if err := os.Chmod(tmp.Name(), fileMode); err != nil {
+		return "", "", err
+	}
+	if err := os.Rename(tmp.Name(), filepath.Join(dstDir, recipientID+".pdf")); err != nil {
+		return "", "", err
+	}
+	return "pdf/" + recipientID + ".pdf", hex.EncodeToString(h.Sum(nil)), nil
 }

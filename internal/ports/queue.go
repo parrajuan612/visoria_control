@@ -16,7 +16,10 @@ const (
 )
 
 // Tipos de tarea ya definidos.
-const TaskOpsPing = "ops:ping" // verificación de punta a punta de la cola
+const (
+	TaskOpsPing   = "ops:ping"   // verificación de punta a punta de la cola
+	TaskDocRender = "doc:render" // genera las propuestas (docx -> PDF) de un lote de destinatarios
+)
 
 var (
 	// ErrDuplicateTask: ya existe una tarea con ese TaskID (idempotencia).

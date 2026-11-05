@@ -158,3 +158,41 @@ func TestRawRowApply(t *testing.T) {
 		t.Error("IsEmpty")
 	}
 }
+
+func TestDocumentoYDespacho(t *testing.T) {
+	ok := &Document{Path: "pdf/x.pdf", SHA256: "abc"}
+	cases := []struct {
+		name     string
+		r        Recipient
+		has, can bool
+	}{
+		{"válida con PDF", Recipient{Estado: RecipientValid, Documento: ok}, true, true},
+		{"válida sin documento", Recipient{Estado: RecipientValid}, false, false},
+		{"documento con error", Recipient{Estado: RecipientValid, Documento: &Document{Error: "x"}}, false, false},
+		{"documento sin ruta", Recipient{Estado: RecipientValid, Documento: &Document{}}, false, false},
+		{"inválida con PDF (obsoleta)", Recipient{Estado: RecipientInvalid, Documento: ok}, true, false},
+		{"omitida", Recipient{Estado: RecipientOmitted, Documento: ok}, true, false},
+	}
+	for _, c := range cases {
+		if c.r.HasDocument() != c.has || c.r.CanDispatch() != c.can {
+			t.Errorf("%s: HasDocument=%v CanDispatch=%v", c.name, c.r.HasDocument(), c.r.CanDispatch())
+		}
+	}
+	recs := []Recipient{
+		{ID: "a", Estado: RecipientValid},
+		{ID: "b", Estado: RecipientValid, Documento: ok},
+		{ID: "c", Estado: RecipientValid, Documento: &Document{Error: "falló"}}, // ya se intentó: no es pendiente
+		{ID: "d", Estado: RecipientInvalid},
+		{ID: "e", Estado: RecipientOmitted},
+	}
+	if p := PendingDocuments(recs); len(p) != 1 || p[0].ID != "a" {
+		t.Errorf("pendientes: %+v", p)
+	}
+}
+
+func TestNombresDePlantillas(t *testing.T) {
+	if len(TemplateKeys) != 3 || TemplateName("cadete_juvenil") != "Cadete y Juvenil" || TemplateName("benjamin_alevin") != "Benjamín y Alevín" ||
+		TemplateName("infantil") != "Infantil" || TemplateName("otra") != "" {
+		t.Errorf("plantillas: %v", TemplateKeys)
+	}
+}

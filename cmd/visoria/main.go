@@ -8,14 +8,19 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"visoria-control/internal/adapters/asynqueue"
 	"visoria-control/internal/adapters/campaignfs"
+	"visoria-control/internal/adapters/docx"
 	"visoria-control/internal/adapters/excel"
+	"visoria-control/internal/adapters/libreoffice"
 	"visoria-control/internal/adapters/redisstore"
 	"visoria-control/internal/adapters/sheets"
+	"visoria-control/internal/adapters/templatefs"
+	"visoria-control/internal/adapters/workspace"
 	"visoria-control/internal/app"
 	"visoria-control/internal/platform/config"
 	"visoria-control/internal/platform/log"
@@ -85,7 +90,26 @@ func run() int {
 		slog.Error("no se pudo preparar DATA_DIR", "dir", cfg.DataDir, "error", err)
 		return 1
 	}
-	campaignSvc := app.NewCampaignService(excel.NewReader(), tournamentRepo, redisstore.NewCampaignRepo(rdb), files)
+	campaignRepo := redisstore.NewCampaignRepo(rdb)
+	campaignSvc := app.NewCampaignService(excel.NewReader(), tournamentRepo, campaignRepo, files)
+
+	// Documentos: plantillas Word en DATA_DIR/templates, relleno en Go y conversión con LibreOffice.
+	templates, err := templatefs.New(filepath.Join(cfg.DataDir, "templates"))
+	if err != nil {
+		slog.Error("no se pudo preparar la carpeta de plantillas", "error", err)
+		return 1
+	}
+	renderer := docx.NewRenderer()
+	docSvc := app.NewDocumentService(app.DocumentDeps{
+		Repo: campaignRepo, Files: files, Templates: templates, Render: renderer,
+		Converter: libreoffice.New(libreoffice.Options{Binary: cfg.Docs.SofficePath, WorkDir: cfg.Docs.WorkDir, Timeout: cfg.Docs.Timeout}),
+		Queue:     queue, Events: redisstore.NewEventPublisher(rdb), Locks: campaignSvc,
+		Workspace: workspace.New(cfg.Docs.WorkDir), BatchSize: cfg.Docs.BatchSize,
+	})
+	tplSvc := app.NewTemplateService(templates, renderer)
+	if _, err := libreoffice.Find(cfg.Docs.SofficePath); err != nil {
+		slog.Warn("LibreOffice no disponible: no se podrán generar las propuestas en PDF", "error", err)
+	}
 	restoreCtx, cancelRestore := context.WithTimeout(ctx, 30*time.Second)
 	if err := cfgSvc.Restore(restoreCtx); err != nil {
 		// No impide arrancar: se puede sincronizar luego desde la pantalla de configuración.
@@ -96,7 +120,7 @@ func run() int {
 	var worker *asynqueue.Worker
 	if roles.Has(RoleWorker) {
 		worker = asynqueue.NewWorker(redisOpt, asynqueue.DefaultQueues, logger)
-		registerHandlers(worker, logger)
+		registerHandlers(worker, logger, docSvc)
 		if err := worker.Start(); err != nil {
 			slog.Error("no se pudo iniciar el worker", "error", err)
 			return 1
@@ -114,7 +138,7 @@ func run() int {
 		}
 		r := gin.New()
 		r.Use(RequestLogger(logger), Recovery())
-		SetupRoutes(r, cfg, rdb, queue, tournamentRepo, importer, cfgSvc, campaignSvc)
+		SetupRoutes(r, cfg, rdb, queue, tournamentRepo, importer, cfgSvc, campaignSvc, docSvc, tplSvc)
 
 		ln, err := net.Listen("tcp", ":"+cfg.Port)
 		if err != nil {

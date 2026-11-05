@@ -51,15 +51,18 @@ func (fakeLegacy) ToPlayers(_ context.Context, recs []domain.Recipient) []domain
 	return out
 }
 
-func router(f *fakeCamp) *gin.Engine {
+func router(f *fakeCamp) *gin.Engine { return routerDocs(f, fakeDocs{}) }
+
+func routerDocs(f *fakeCamp, d fakeDocs) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewCampaignHandler(f, fakeLegacy{})
+	h := NewCampaignHandler(f, fakeLegacy{}, d)
 	r.POST("/campaigns", h.Create)
 	r.GET("/campaigns", h.List)
 	r.GET("/campaigns/:id", h.Get)
 	r.GET("/campaigns/:id/players", h.Players)
 	r.PATCH("/campaigns/:id/recipients/:rid", h.EditRecipient)
+	r.POST("/campaigns/:id/documents", h.Documents)
 	return r
 }
 
@@ -225,5 +228,48 @@ func TestTruthy(t *testing.T) {
 		if truthy(in) != want {
 			t.Errorf("truthy(%q)", in)
 		}
+	}
+}
+
+type fakeDocs struct {
+	res ports.GenerateResult
+	err error
+}
+
+func (f fakeDocs) Generate(context.Context, string) (ports.GenerateResult, error) {
+	return f.res, f.err
+}
+
+func TestDocumentsEndpoint(t *testing.T) {
+	post := func(d fakeDocs, id string) (int, map[string]any) {
+		return call(routerDocs(&fakeCamp{}, d), "POST", "/campaigns/"+id+"/documents", nil, "")
+	}
+	if code, out := post(fakeDocs{res: ports.GenerateResult{Queued: 7, Batches: 1, Pending: 7}}, "c1"); code != 202 || out["resultado"].(map[string]any)["encolados"] != float64(7) {
+		t.Errorf("encolada: %d %v", code, out)
+	}
+	if code, out := post(fakeDocs{res: ports.GenerateResult{}}, "c1"); code != 200 || out["message"] != "Todas las propuestas ya están generadas." {
+		t.Errorf("sin pendientes: %d %v", code, out)
+	}
+	cases := map[int]error{
+		400: &ports.InputError{Message: "Falta la plantilla «cadete_juvenil.docx» en la carpeta plantillas."},
+		404: ports.ErrCampaignNotFound, 409: ports.ErrCampaignLocked, 500: errors.New("redis: password=secreto"),
+	}
+	if code, out := post(fakeDocs{err: ports.ErrGenerationRunning}, "c1"); code != 409 || out["error"] != "Ya se están generando las propuestas de esta campaña." {
+		t.Errorf("ya en curso: %d %v", code, out)
+	}
+	for want, e := range cases {
+		code, out := post(fakeDocs{err: e}, "c1")
+		if code != want {
+			t.Errorf("%v → %d, quería %d", e, code, want)
+		}
+		if want == 500 && strings.Contains(out["error"].(string), "secreto") {
+			t.Error("el error interno no debe filtrarse")
+		}
+		if want == 400 && !strings.HasPrefix(out["error"].(string), "Falta la plantilla") {
+			t.Errorf("mensaje: %v", out)
+		}
+	}
+	if code, _ := post(fakeDocs{}, "a:b"); code != 404 {
+		t.Errorf("id inválido: %d", code)
 	}
 }

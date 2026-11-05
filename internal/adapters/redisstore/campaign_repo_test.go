@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -117,5 +118,86 @@ func TestCampaignRepoGrande(t *testing.T) {
 	got, err := repo.Recipients(ctx, "grande")
 	if err != nil || len(got) != 5000 || got[0].Fila != 2 || got[4999].Fila != 5001 {
 		t.Errorf("5000 filas: %d %v", len(got), err)
+	}
+}
+
+func TestSetStatusAtomico(t *testing.T) {
+	_, rdb, _ := setup(t)
+	repo := NewCampaignRepo(rdb)
+	ctx := context.Background()
+	c, recs := sampleCampaign("st1", time.Now())
+	if err := repo.Create(ctx, c, recs, domain.Summarize(recs)); err != nil {
+		t.Fatal(err)
+	}
+	D, R, DONE := domain.CampaignDraft, domain.CampaignDocsRunning, domain.CampaignDocsDone
+
+	// Cambia solo si el estado actual está permitido.
+	if ok, err := repo.SetStatus(ctx, "st1", []domain.CampaignStatus{R}, DONE); err != nil || ok {
+		t.Errorf("no está en DOCS_RUNNING: %v %v", ok, err)
+	}
+	if ok, err := repo.SetStatus(ctx, "st1", []domain.CampaignStatus{D, domain.CampaignReady}, R); err != nil || !ok {
+		t.Fatalf("DRAFT→DOCS_RUNNING: %v %v", ok, err)
+	}
+	got, _ := repo.Get(ctx, "st1")
+	if got.Status != R {
+		t.Errorf("Get debe reflejar el estado vigente: %s", got.Status)
+	}
+	list, _ := repo.List(ctx, 10)
+	if len(list) != 1 || list[0].Status != R {
+		t.Errorf("el listado también: %+v", list)
+	}
+	if _, err := repo.SetStatus(ctx, "no-existe", []domain.CampaignStatus{D}, R); !errors.Is(err, ports.ErrCampaignNotFound) {
+		t.Errorf("inexistente: %v", err)
+	}
+	if n, _ := rdb.Exists(ctx, campaignKey("no-existe")).Result(); n != 0 {
+		t.Error("no debe crear la campaña")
+	}
+
+	// Carrera: 40 goroutines quieren pasar de DRAFT a DOCS_RUNNING; solo UNA lo logra.
+	c2, recs2 := sampleCampaign("st2", time.Now())
+	repo.Create(ctx, c2, recs2, domain.Summarize(recs2))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	wins := 0
+	for i := 0; i < 40; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ok, err := repo.SetStatus(ctx, "st2", []domain.CampaignStatus{D}, R); err == nil && ok {
+				mu.Lock()
+				wins++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if wins != 1 {
+		t.Errorf("ganadores=%d, debía ser 1", wins)
+	}
+
+	// Una campaña antigua sin campo "status" se trata como DRAFT.
+	rdb.HDel(ctx, campaignKey("st1"), "status")
+	if ok, err := repo.SetStatus(ctx, "st1", []domain.CampaignStatus{D}, R); err != nil || !ok {
+		t.Errorf("sin campo status = DRAFT: %v %v", ok, err)
+	}
+}
+
+func TestEventPublisher(t *testing.T) {
+	_, rdb, camp := setup(t)
+	pub := NewEventPublisher(rdb)
+	ctx := context.Background()
+	if err := pub.Publish(ctx, camp, "document", map[string]any{"recipient_id": "r1", "ok": true}); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := rdb.XRange(ctx, eventsKey(camp), "-", "+").Result()
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("stream: %v %v", msgs, err)
+	}
+	v := msgs[0].Values
+	if v["type"] != "document" || v["data"] != `{"ok":true,"recipient_id":"r1"}` || v["at"] == "" {
+		t.Errorf("evento: %v", v)
+	}
+	if err := pub.Publish(ctx, camp, "x", make(chan int)); err == nil {
+		t.Error("un dato no serializable debe fallar")
 	}
 }

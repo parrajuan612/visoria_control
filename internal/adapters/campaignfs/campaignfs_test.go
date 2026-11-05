@@ -126,3 +126,56 @@ func TestRechazaRutasPeligrosasYBaseVacia(t *testing.T) {
 		t.Error("base inválida debe fallar")
 	}
 }
+
+func TestSavePDF(t *testing.T) {
+	s, _ := New(t.TempDir())
+	c := camp()
+	ctx := context.Background()
+	src := filepath.Join(t.TempDir(), "x.pdf")
+	os.WriteFile(src, []byte("%PDF-1.4\ncontenido"), 0o600)
+
+	rel, sum, err := s.SavePDF(ctx, c, "abc123", src)
+	if err != nil || rel != "pdf/abc123.pdf" {
+		t.Fatalf("SavePDF: %q %v", rel, err)
+	}
+	// SHA-256 de "%PDF-1.4\ncontenido"
+	if len(sum) != 64 {
+		t.Errorf("sha=%q", sum)
+	}
+	d, _ := s.dir(c)
+	got, _ := os.ReadFile(filepath.Join(d, rel))
+	if string(got) != "%PDF-1.4\ncontenido" {
+		t.Errorf("contenido: %q", got)
+	}
+	if info, _ := os.Stat(filepath.Join(d, rel)); info.Mode().Perm()&0o007 != 0 {
+		t.Errorf("permisos abiertos: %v", info.Mode())
+	}
+	// Reemplazar (regenerar) es atómico y no deja temporales.
+	os.WriteFile(src, []byte("%PDF-1.7 nuevo"), 0o600)
+	if _, sum2, err := s.SavePDF(ctx, c, "abc123", src); err != nil || sum2 == sum {
+		t.Errorf("regenerar: %v (la huella debe cambiar)", err)
+	}
+	entries, _ := os.ReadDir(filepath.Join(d, "pdf"))
+	if len(entries) != 1 {
+		t.Errorf("solo debe haber un PDF: %v", entries)
+	}
+	// Lo que no es PDF, o no existe, se rechaza; y los IDs peligrosos también.
+	bad := filepath.Join(t.TempDir(), "bad.pdf")
+	os.WriteFile(bad, []byte("no soy un pdf"), 0o600)
+	if _, _, err := s.SavePDF(ctx, c, "abc123", bad); err == nil {
+		t.Error("un archivo que no es PDF debe rechazarse")
+	}
+	empty := filepath.Join(t.TempDir(), "e.pdf")
+	os.WriteFile(empty, nil, 0o600)
+	if _, _, err := s.SavePDF(ctx, c, "abc123", empty); err == nil {
+		t.Error("un PDF vacío debe rechazarse")
+	}
+	if _, _, err := s.SavePDF(ctx, c, "abc123", "/no/existe.pdf"); err == nil {
+		t.Error("origen inexistente")
+	}
+	for _, id := range []string{"", "../x", "a/b", "a b", "x.pdf"} {
+		if _, _, err := s.SavePDF(ctx, c, id, src); err == nil {
+			t.Errorf("ID %q debía rechazarse", id)
+		}
+	}
+}

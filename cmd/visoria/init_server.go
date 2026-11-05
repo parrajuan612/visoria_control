@@ -18,7 +18,7 @@ import (
 // queue se usará desde la Fase 3/5 (despacho de entregas).
 func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, _ ports.TaskQueue,
 	tournamentRepo ports.TournamentRepository, importer *app.ImportService, cfgSvc ports.ConfigUseCase,
-	campaignSvc ports.CampaignUseCase) {
+	campaignSvc ports.CampaignUseCase, docSvc ports.DocumentUseCase, tplSvc ports.TemplateUseCase) {
 	// 1. Instanciar Adaptadores (Repositorios y APIs Externas)
 	pdfs := pdfgen.New(pdfgen.PDFDir) // generador y a la vez DocumentStore
 	waAPI := whatsapp.New(cfg.WhatsApp.Token, cfg.WhatsApp.PhoneID, cfg.WhatsApp.APIVersion)
@@ -36,5 +36,5 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, _ ports.T
 	handler := httpadapter.NewVisoriaHandler(visoriaService)
 
 	r.GET("/healthz", Healthz(rdb))
-	InitRouter(r, handler, httpadapter.NewConfigHandler(cfgSvc), httpadapter.NewCampaignHandler(campaignSvc, visoriaService), cfg.CORSOrigins)
+	InitRouter(r, handler, httpadapter.NewConfigHandler(cfgSvc), httpadapter.NewCampaignHandler(campaignSvc, visoriaService, docSvc), httpadapter.NewTemplateHandler(tplSvc), cfg.CORSOrigins)
 }

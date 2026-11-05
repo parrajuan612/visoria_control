@@ -459,3 +459,13 @@ type ConfigSnapshot struct {
 	// Issues son los hallazgos no bloqueantes (advertencias e info) de esa sincronización.
 	Issues []Issue `json:"issues"`
 }
+
+// Plantillas Word que reconoce el sistema (config.py: PLANTILLAS), en el orden de las pantallas.
+var TemplateKeys = []string{"cadete_juvenil", "benjamin_alevin", "infantil"}
+
+var templateNames = map[string]string{
+	"cadete_juvenil": "Cadete y Juvenil", "benjamin_alevin": "Benjamín y Alevín", "infantil": "Infantil",
+}
+
+// TemplateName devuelve el nombre para mostrar de una plantilla ("" si no existe).
+func TemplateName(key string) string { return templateNames[key] }

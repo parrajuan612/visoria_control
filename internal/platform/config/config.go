@@ -29,6 +29,8 @@ type Config struct {
 	// enviar otra desde la API (POST /api/v1/config/sync) sin reiniciar.
 	SheetsURL string
 
+	Docs Docs
+
 	WhatsApp WhatsApp
 	Chatwoot Chatwoot
 	Redis    Redis
@@ -37,6 +39,14 @@ type Config struct {
 
 	// Pausa entre envíos de WhatsApp (antes fija en 6 s en el código).
 	WhatsAppPause time.Duration
+}
+
+// Docs configura la generación de propuestas (Word -> PDF con LibreOffice).
+type Docs struct {
+	SofficePath string        // vacío = se busca soffice/libreoffice en el PATH
+	BatchSize   int           // destinatarios por tanda de conversión (SDD: 25)
+	Timeout     time.Duration // plazo por tanda (SDD: 10 min)
+	WorkDir     string        // carpeta de trabajo; vacía = temporal del sistema. LibreOffice por snap no lee /tmp.
 }
 
 type WhatsApp struct {
@@ -166,9 +176,18 @@ func fromLookup(get func(string) string) (*Config, error) {
 			Port:         integer("IMAP_PORT", 993),
 			PollInterval: time.Duration(integer("IMAP_POLL_MINUTES", 10)) * time.Minute,
 		},
+		Docs: Docs{
+			SofficePath: str("SOFFICE_PATH", ""),
+			BatchSize:   integer("DOCS_BATCH_SIZE", 25),
+			Timeout:     duration("DOCS_TIMEOUT", 10*time.Minute),
+			WorkDir:     str("DOCS_WORKDIR", ""),
+		},
 		WhatsAppPause: duration("WHATSAPP_PAUSE", 6*time.Second),
 	}
 
+	if c.Docs.BatchSize < 1 || c.Docs.BatchSize > 100 {
+		errs = append(errs, fmt.Errorf("DOCS_BATCH_SIZE debe estar entre 1 y 100, recibió %d", c.Docs.BatchSize))
+	}
 	if c.Env == "production" && c.Redis.Password == "" {
 		errs = append(errs, errors.New("REDIS_PASSWORD es obligatoria en producción"))
 	}

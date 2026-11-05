@@ -23,26 +23,34 @@ type CampaignService struct {
 	newID  func() string
 	now    func() time.Time
 
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex // una edición a la vez por campaña
+	locks *keyedLocks // una edición a la vez por campaña (se comparte con la generación de documentos)
+}
+
+// keyedLocks da un candado por clave (ID de campaña).
+type keyedLocks struct {
+	mu sync.Mutex
+	m  map[string]*sync.Mutex
+}
+
+func newKeyedLocks() *keyedLocks { return &keyedLocks{m: map[string]*sync.Mutex{}} }
+
+// lock bloquea la clave y devuelve la función que la libera.
+func (k *keyedLocks) lock(id string) func() {
+	k.mu.Lock()
+	m, ok := k.m[id]
+	if !ok {
+		m = &sync.Mutex{}
+		k.m[id] = m
+	}
+	k.mu.Unlock()
+	m.Lock()
+	return m.Unlock
 }
 
 var _ ports.CampaignUseCase = (*CampaignService)(nil)
 
 func NewCampaignService(reader ports.PlayerSheetReader, cfg ports.ConfigProvider, repo ports.CampaignRepo, files ports.CampaignFiles) *CampaignService {
-	return &CampaignService{reader: reader, cfg: cfg, repo: repo, files: files, newID: randomID, now: time.Now, locks: map[string]*sync.Mutex{}}
-}
-
-func (s *CampaignService) lock(id string) func() {
-	s.mu.Lock()
-	m, ok := s.locks[id]
-	if !ok {
-		m = &sync.Mutex{}
-		s.locks[id] = m
-	}
-	s.mu.Unlock()
-	m.Lock()
-	return m.Unlock
+	return &CampaignService{reader: reader, cfg: cfg, repo: repo, files: files, newID: randomID, now: time.Now, locks: newKeyedLocks()}
 }
 
 func input(format string, a ...any) error {
@@ -124,7 +132,7 @@ func (s *CampaignService) List(ctx context.Context) ([]domain.CampaignView, erro
 // EditRecipient aplica una corrección a las celdas de una fila y vuelve a validar TODO el lote
 // con la configuración congelada de la campaña (un duplicado se puede resolver o crear al editar).
 func (s *CampaignService) EditRecipient(ctx context.Context, campaignID, recipientID string, patch domain.RecipientPatch, by string) (ports.EditResult, error) {
-	defer s.lock(campaignID)()
+	defer s.locks.lock(campaignID)()
 
 	c, err := s.repo.Get(ctx, campaignID)
 	if err != nil {
@@ -170,6 +178,9 @@ func (s *CampaignService) EditRecipient(ctx context.Context, campaignID, recipie
 	for i := range updated {
 		updated[i].ID = recs[i].ID
 		updated[i].Editado = recs[i].Editado || i == idx
+		if i != idx { // el documento de las demás filas sigue siendo válido: su contenido no cambió
+			updated[i].Documento = recs[i].Documento
+		} // la fila editada queda SIN documento: el PDF anterior ya no corresponde a sus datos (SDD §4.3)
 		if i == idx || !sameJSON(updated[i], recs[i]) {
 			changed = append(changed, updated[i])
 			if i != idx {
@@ -187,6 +198,9 @@ func (s *CampaignService) EditRecipient(ctx context.Context, campaignID, recipie
 		ev := domain.AuditEvent{Time: now, Type: "recipient.edited", CampaignID: campaignID, RecipientID: recipientID,
 			Fila: recs[idx].Fila, Field: ch.Field, Old: ch.Old, New: ch.New, By: by,
 			Detail: fmt.Sprintf("estado %s -> %s", recs[idx].Estado, updated[idx].Estado)}
+		if recs[idx].Documento != nil {
+			ev.Detail += "; el documento generado quedó obsoleto"
+		}
 		if err := s.files.Audit(ctx, c, ev); err != nil {
 			// La corrección ya está guardada: no se revierte, pero queda registrado el fallo.
 			log.FromContext(ctx).Error("no se pudo escribir la auditoría", "campaign_id", campaignID, "error", err)
