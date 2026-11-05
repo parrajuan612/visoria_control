@@ -13,3 +13,6 @@ MajesticBecas*
 
 # Binarios
 /bin/
+
+# Carpetas de trabajo de las pruebas con LibreOffice (snap no lee /tmp)
+lo-test-*/

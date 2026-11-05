@@ -247,3 +247,17 @@ func pdfText(t *testing.T, path string) string {
 	}
 	return string(out)
 }
+
+// realConfig es la hoja REAL del cliente (fixture de sheets).
+func realConfig(t *testing.T) domain.MasterConfig {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "internal/adapters/sheets/testdata/informacion_torneos.csv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, issues := sheets.Parse(bytes.NewReader(data))
+	if domain.HasErrors(issues) || domain.HasErrors(cfg.Validate()) {
+		t.Fatalf("la hoja real debe ser válida: %v", issues)
+	}
+	return cfg
+}
