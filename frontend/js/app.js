@@ -70,45 +70,78 @@ document.getElementById('excelUpload').addEventListener('change', async (e) => {
 
     try {
         console.log("Subiendo archivo...");
-        // Llamamos a la función de api.js
         const data = await uploadPlayersExcel(file);
-        
+
         // Guardamos los jugadores procesados
         window.currentPlayers = data.data;
-        
+
+        renderValidationSummary(data.resumen);
         renderValidationTable(window.currentPlayers);
     } catch (error) {
         alert("Error: " + error.message);
+    } finally {
+        e.target.value = ''; // permite volver a subir el mismo archivo ya corregido
     }
 });
 
-// Dibuja la tabla en el HTML
+// Crea un nodo con texto (nunca innerHTML: los datos vienen de un Excel editable por terceros).
+function node(tag, className, text) {
+    const n = document.createElement(tag);
+    if (className) n.className = className;
+    if (text !== undefined) n.textContent = text;
+    return n;
+}
+
+function renderValidationSummary(r) {
+    const box = document.getElementById('validationSummary');
+    box.classList.remove('hidden');
+    if (!r) { box.classList.add('hidden'); return; }
+    box.replaceChildren(
+        node('span', 'text-green-700 mr-4', `${r.validas} listas`),
+        node('span', 'text-red-700 mr-4', `${r.con_errores} con errores`),
+        node('span', 'text-gray-500 mr-4', `${r.omitidas} sin beca (se omiten)`),
+        node('span', 'text-amber-700', `${r.con_advertencias} con advertencias`));
+}
+
+const ISSUE_STYLE = { 'error': 'text-red-600', 'advertencia': 'text-amber-600', 'info': 'text-gray-500' };
+
+// Dibuja la tabla de validación: una fila por jugador con su estado y los hallazgos.
 function renderValidationTable(players) {
     const tableContainer = document.getElementById('validationTable');
     tableContainer.classList.remove('hidden');
-    
-    let html = `<table class="w-full text-left bg-white rounded shadow text-sm">
-                    <thead class="bg-gray-100 text-gray-600">
-                        <tr><th class="p-2">Jugador</th><th class="p-2">Torneo Asignado</th><th class="p-2">Estado</th></tr>
-                    </thead><tbody>`;
+
+    const table = node('table', 'w-full text-left bg-white rounded shadow text-sm');
+    const head = node('tr');
+    ['Jugador', 'Torneo Asignado', 'Estado'].forEach(h => head.append(node('th', 'p-2', h)));
+    const thead = node('thead', 'bg-gray-100 text-gray-600');
+    thead.append(head);
+    table.append(thead);
+    const tbody = node('tbody');
 
     players.forEach(p => {
-        const isError = p.Status !== 'PENDING';
-        const torneoNombre = p.Tournament && p.Tournament.Name ? p.Tournament.Name : '<span class="text-red-500 font-bold">Sin Torneo</span>';
-        
-        let statusText = 'Ok';
-        if (p.Status === 'INVALID_DATA') statusText = 'Faltan Datos';
-        if (p.Status === 'INVALID_MATCH') statusText = 'Error Beca/Año';
+        const isOk = p.Status === 'PENDING';
+        let statusText = 'Ok', statusClass = 'text-green-500';
+        if (p.Status === 'OMITTED') { statusText = 'Sin beca (se omite)'; statusClass = 'text-gray-500'; }
+        if (p.Status === 'INVALID_DATA') { statusText = 'Faltan Datos'; statusClass = 'text-red-500'; }
+        if (p.Status === 'INVALID_MATCH') { statusText = 'Error Beca/Año'; statusClass = 'text-red-500'; }
 
-        html += `<tr class="border-b ${isError ? 'bg-red-50' : 'hover:bg-gray-50'}">
-                    <td class="p-2">${p.Name}</td>
-                    <td class="p-2 text-xs text-gray-500">${torneoNombre}</td>
-                    <td class="p-2 font-bold ${isError ? 'text-red-500' : 'text-green-500'}">${statusText}</td>
-                </tr>`;
+        const tr = node('tr', `border-b ${isOk || p.Status === 'OMITTED' ? 'hover:bg-gray-50' : 'bg-red-50'}`);
+        const name = node('td', 'p-2 align-top');
+        name.append(node('div', 'font-medium', p.Name));
+        // Hallazgos (errores primero) debajo del nombre.
+        (p.Issues || []).filter(i => i.nivel !== 'info').sort((a, b) => (a.nivel === 'error' ? 0 : 1) - (b.nivel === 'error' ? 0 : 1))
+            .forEach(i => name.append(node('div', `text-xs ${ISSUE_STYLE[i.nivel] || ''}`, `${i.campo}: ${i.mensaje}`)));
+
+        const torneo = node('td', 'p-2 text-xs text-gray-500 align-top');
+        if (p.Tournament && p.Tournament.Name) torneo.textContent = p.Tournament.Name;
+        else torneo.append(node('span', 'text-red-500 font-bold', 'Sin Torneo'));
+
+        tr.append(name, torneo, node('td', `p-2 font-bold align-top ${statusClass}`, statusText));
+        tbody.append(tr);
     });
 
-    html += `</tbody></table>`;
-    tableContainer.innerHTML = html;
+    table.append(tbody);
+    tableContainer.replaceChildren(table);
 }
 
 // En js/app.js

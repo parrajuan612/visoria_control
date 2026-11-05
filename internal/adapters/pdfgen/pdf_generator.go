@@ -101,8 +101,7 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 	pdf.CellFormat(0, rowHeight, tr(player.Club), "", 1, "L", false, 0, "")
 
 	pdf.SetFont("Arial", "B", 10)
-	// Cambiamos la palabra "Año" por "Fecha"
-	pdf.CellFormat(colWidth, rowHeight, tr("Fecha de Nacimiento:"), "", 0, "L", false, 0, "")
+	pdf.CellFormat(colWidth, rowHeight, tr("Año de Nacimiento:"), "", 0, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
 	// Imprimimos el nuevo string directamente
 	pdf.CellFormat(0, rowHeight, player.BirthDate, "", 1, "L", false, 0, "")
@@ -110,7 +109,7 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 	pdf.SetFont("Arial", "B", 10)
 	pdf.CellFormat(colWidth, rowHeight, tr("Móvil:"), "", 0, "L", false, 0, "")
 	pdf.SetFont("Arial", "", 10)
-	pdf.CellFormat(0, rowHeight, "(+57) "+player.PrimaryPhone, "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, rowHeight, formatPhone(player.PrimaryPhone), "", 1, "L", false, 0, "")
 	pdf.Ln(4)
 
 	pdf.SetFont("Arial", "BU", 10)
@@ -315,4 +314,17 @@ func (g *pdfGenerator) Generate(player domain.Player, tournament domain.Tourname
 	}
 
 	return fileName, nil
+}
+
+// formatPhone muestra "(+57) 3209323449" para móviles colombianos (10 dígitos) y
+// "+34612345678" para los internacionales.
+func formatPhone(phone string) string {
+	switch {
+	case phone == "":
+		return "-"
+	case len(phone) == 10:
+		return "(+57) " + phone
+	default:
+		return "+" + phone
+	}
 }

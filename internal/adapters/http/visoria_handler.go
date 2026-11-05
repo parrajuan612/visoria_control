@@ -2,6 +2,7 @@ package httpadapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,6 +24,8 @@ func NewVisoriaHandler(s ports.VisoriaService) *VisoriaHandler {
 }
 
 func (h *VisoriaHandler) UploadPlayersExcel(c *gin.Context) {
+	// Tope de 10 MB (SDD §4.2): un Excel de jugadores pesa unos KB.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No se encontró el archivo 'file' en la petición"})
@@ -30,20 +33,29 @@ func (h *VisoriaHandler) UploadPlayersExcel(c *gin.Context) {
 	}
 	defer file.Close()
 
-	if !strings.HasSuffix(header.Filename, ".xlsx") {
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".xlsx") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Por favor sube un archivo con formato .xlsx"})
 		return
 	}
 
-	players, err := h.service.ProcessPlayersExcel(c.Request.Context(), file)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error procesando el archivo: " + err.Error()})
+	players, summary, err := h.service.ProcessPlayersExcel(c.Request.Context(), file)
+	switch {
+	case errors.Is(err, ports.ErrNoConfig):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	case errors.Is(err, ports.ErrInvalidSpreadsheet):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+		return
+	case err != nil:
+		log.FromContext(c.Request.Context()).Error("error procesando el Excel", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error interno procesando el archivo"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Archivo procesado exitosamente",
 		"data":    players,
+		"resumen": summary,
 	})
 }
 

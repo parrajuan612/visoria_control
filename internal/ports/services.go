@@ -9,7 +9,9 @@ import (
 
 // VisoriaService: lo que los adaptadores de entrada (HTTP) pueden pedirle al negocio.
 type VisoriaService interface {
-	ProcessPlayersExcel(ctx context.Context, file multipart.File) ([]domain.Player, error)
+	// ProcessPlayersExcel lee y valida el Excel. Los errores de formato envuelven
+	// ErrInvalidSpreadsheet; sin configuración sincronizada devuelve ErrNoConfig.
+	ProcessPlayersExcel(ctx context.Context, file multipart.File) ([]domain.Player, domain.BatchSummary, error)
 	GenerateDocuments(ctx context.Context, players []domain.Player) ([]string, error)
 	DispatchWhatsAppMessages(ctx context.Context, players []domain.Player, progressChan chan<- string) error
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"visoria-control/internal/adapters/asynqueue"
+	"visoria-control/internal/adapters/excel"
 	"visoria-control/internal/adapters/redisstore"
 	"visoria-control/internal/adapters/sheets"
 	"visoria-control/internal/app"
@@ -77,6 +78,7 @@ func run() int {
 	tournamentRepo := sheets.NewRepository()
 	cfgSvc := app.NewConfigService(sheets.NewSource(), redisstore.NewConfigStore(rdb), tournamentRepo,
 		cfg.SheetsURL, sheets.ValidateGoogleSheetsURL)
+	importer := app.NewImportService(excel.NewReader(), tournamentRepo)
 	restoreCtx, cancelRestore := context.WithTimeout(ctx, 30*time.Second)
 	if err := cfgSvc.Restore(restoreCtx); err != nil {
 		// No impide arrancar: se puede sincronizar luego desde la pantalla de configuración.
@@ -105,7 +107,7 @@ func run() int {
 		}
 		r := gin.New()
 		r.Use(RequestLogger(logger), Recovery())
-		SetupRoutes(r, cfg, rdb, queue, tournamentRepo, cfgSvc)
+		SetupRoutes(r, cfg, rdb, queue, tournamentRepo, importer, cfgSvc)
 
 		ln, err := net.Listen("tcp", ":"+cfg.Port)
 		if err != nil {

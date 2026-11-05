@@ -11,8 +11,6 @@ import (
 	"visoria-control/internal/domain"
 	"visoria-control/internal/platform/log"
 	"visoria-control/internal/ports"
-
-	"github.com/xuri/excelize/v2"
 )
 
 // Options agrupa los valores de configuración que necesita el servicio
@@ -23,120 +21,71 @@ type Options struct {
 }
 
 type visoriaService struct {
-	repo   ports.TournamentRepository
-	pdfGen ports.PDFGenerator
-	docs   ports.DocumentStore
-	waAPI  ports.WhatsAppAPI
-	chat   ports.ChatwootClient
-	opts   Options
+	repo     ports.TournamentRepository
+	pdfGen   ports.PDFGenerator
+	docs     ports.DocumentStore
+	waAPI    ports.WhatsAppAPI
+	chat     ports.ChatwootClient
+	importer *ImportService
+	opts     Options
 }
 
-func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, docs ports.DocumentStore, waAPI ports.WhatsAppAPI, chat ports.ChatwootClient, opts Options) ports.VisoriaService {
+func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, docs ports.DocumentStore, waAPI ports.WhatsAppAPI, chat ports.ChatwootClient, importer *ImportService, opts Options) ports.VisoriaService {
 	return &visoriaService{
-		repo:   repo,
-		pdfGen: pdfGen,
-		docs:   docs,
-		waAPI:  waAPI,
-		chat:   chat,
-		opts:   opts,
+		repo:     repo,
+		pdfGen:   pdfGen,
+		docs:     docs,
+		waAPI:    waAPI,
+		chat:     chat,
+		importer: importer,
+		opts:     opts,
 	}
 }
 
-func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart.File) ([]domain.Player, error) {
-
-	f, err := excelize.OpenReader(file)
+func (s *visoriaService) ProcessPlayersExcel(ctx context.Context, file multipart.File) ([]domain.Player, domain.BatchSummary, error) {
+	res, err := s.importer.Import(ctx, file, domain.ValidationOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("error al abrir el archivo Excel: %w", err)
+		return nil, domain.BatchSummary{}, err
 	}
-	defer f.Close()
-
-	sheetName := f.GetSheetList()[0]
-	rows, err := f.GetRows(sheetName)
-	if err != nil {
-		return nil, fmt.Errorf("error leyendo las filas de la hoja %s: %w", sheetName, err)
+	players := make([]domain.Player, 0, len(res.Recipients))
+	for _, r := range res.Recipients {
+		players = append(players, s.toPlayer(ctx, r))
 	}
-
-	var players []domain.Player
-
-	for i, row := range rows {
-		if i == 0 {
-			continue
-		}
-		if len(row) < 4 {
-			continue
-		}
-
-		getCol := func(idx int) string {
-			if idx < len(row) {
-				return strings.TrimSpace(row[idx])
-			}
-			return ""
-		}
-
-		becaRaw := getCol(2)
-		beca := becaRaw
-		if becaRaw != "" && becaRaw != "ACOMPAÑANTE" && becaRaw != "SIN BECA" && !strings.Contains(becaRaw, "%") {
-			beca = becaRaw + "%"
-		}
-
-		fechaNac := getCol(3)
-		var anio int
-		var fechaNacFormatted string
-
-		parsedDate := parseBirthDate(fechaNac)
-		if !parsedDate.IsZero() {
-			anio = parsedDate.Year()
-			fechaNacFormatted = parsedDate.Format("02/01/2006")
-		} else {
-			if len(fechaNac) >= 4 {
-				anio, _ = strconv.Atoi(fechaNac[:4])
-			}
-			fechaNacFormatted = fechaNac
-		}
-
-		torneoInfo, _ := s.repo.GetTournamentForPlayer(ctx, anio, beca)
-
-		player := domain.Player{
-			Name:         getCol(0),
-			Club:         getCol(1),
-			GuardianName: getCol(4),
-			PrimaryPhone: getCol(5),
-			Scholarship:  beca,
-			BirthYear:    anio,
-			BirthDate:    fechaNacFormatted,
-			Status:       "PENDING",
-			Tournament:   torneoInfo,
-			FileID:       fmt.Sprintf("%d", time.Now().UnixNano()),
-		}
-
-		if player.Name == "" || player.PrimaryPhone == "" || anio == 0 {
-			player.Status = "INVALID_DATA"
-		} else if player.Tournament.Name == "" || player.Tournament.Pricing.Total == "No definido" {
-			player.Status = "INVALID_MATCH"
-		}
-
-		players = append(players, player)
-	}
-
-	return players, nil
+	return players, res.Summary, nil
 }
 
-func parseBirthDate(value string) time.Time {
-	formats := []string{
-		"01-02-06",
-		"01-02-2006",
-		"02/01/2006",
-		"02-01-2006",
-		"2006-01-02",
-		"01/02/06",
+// toPlayer adapta un destinatario validado al modelo del flujo actual (se retira cuando
+// el flujo pase a las colas, Fases 4-5).
+func (s *visoriaService) toPlayer(ctx context.Context, r domain.Recipient) domain.Player {
+	p := domain.Player{
+		Name:         r.Jugador,
+		Club:         r.Club,
+		GuardianName: r.Acudiente,
+		PrimaryPhone: domain.NationalPhone(r.Movil),
+		Email:        strings.Join(r.Correos, ", "),
+		Scholarship:  domain.BecaLabel(r.Beca),
+		BirthYear:    r.Anio,
+		FileID:       r.ID,
+		Issues:       r.Issues,
 	}
-
-	for _, format := range formats {
-		if date, err := time.Parse(format, value); err == nil {
-			return date
+	if r.Anio != 0 {
+		p.BirthDate = strconv.Itoa(r.Anio)
+		p.Tournament, _ = s.repo.GetTournamentForPlayer(ctx, r.Anio, p.Scholarship)
+	}
+	switch r.Estado {
+	case domain.RecipientValid:
+		p.Status = "PENDING"
+	case domain.RecipientOmitted:
+		p.Status = "OMITTED"
+	default:
+		p.Status = "INVALID_DATA"
+		for _, i := range r.Issues {
+			if i.Nivel == domain.IssueError && (i.Campo == domain.CampoTorneo || i.Campo == domain.CampoCategoria) {
+				p.Status = "INVALID_MATCH"
+			}
 		}
 	}
-	return time.Time{}
+	return p
 }
 
 func (s *visoriaService) GenerateDocuments(ctx context.Context, players []domain.Player) ([]string, error) {
@@ -162,7 +111,16 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 	lg := log.FromContext(ctx)
 	for i, p := range players {
 		if p.Status != "PENDING" {
-			progressChan <- fmt.Sprintf("⚠️ Omitido %s: datos inválidos (%s)", p.Name, p.Status)
+			motivo := "datos inválidos"
+			if p.Status == "OMITTED" {
+				motivo = "SIN BECA, no se genera propuesta"
+			}
+			progressChan <- fmt.Sprintf("⚠️ Omitido %s: %s", p.Name, motivo)
+			continue
+		}
+
+		if p.PrimaryPhone == "" { // solo tiene correo; el envío por correo llega en la Fase 6
+			progressChan <- fmt.Sprintf("⚠️ Omitido %s: no tiene móvil (el envío por correo aún no está disponible)", p.Name)
 			continue
 		}
 

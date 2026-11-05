@@ -92,14 +92,16 @@
                     <h2 class="text-xl font-bold text-gray-700 border-b pb-2 mb-6">Paso 2: Base de Datos Jugadores</h2>
                     
                     <div class="border-2 border-dashed border-gray-300 rounded-lg p-10 text-center hover:bg-gray-50 transition mb-6 cursor-pointer" onclick="document.getElementById('excelUpload').click()">
-                        <p class="text-gray-500 mb-2">Arrastra o haz clic para subir el Excel (.csv)</p>
-                        <input type="file" id="excelUpload" class="hidden" accept=".csv">
+                        <p class="text-gray-500 mb-2">Arrastra o haz clic para subir el Excel (.xlsx)</p>
+                        <input type="file" id="excelUpload" class="hidden" accept=".xlsx">
                         <button class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded border border-gray-400">
                             Seleccionar Archivo
                         </button>
                     </div>
 
-                    <div id="validationTable" class="hidden bg-gray-50 border border-gray-200 rounded p-4 mb-6 max-h-64 overflow-y-auto">
+                    <p class="text-xs text-gray-500 mb-3">Columnas esperadas: Nombre, Club, Beca, Año de nacimiento (solo el año, ej. 2010), Acudiente, Móvil y Correo. Basta con un móvil o un correo por fila.</p>
+                    <div id="validationSummary" class="hidden mb-3 text-sm font-medium"></div>
+                    <div id="validationTable" class="hidden bg-gray-50 border border-gray-200 rounded p-4 mb-6 max-h-96 overflow-y-auto">
                         <!-- Aquí se inyectará la tabla -->
                     </div>
 

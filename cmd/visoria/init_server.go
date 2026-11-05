@@ -17,7 +17,7 @@ import (
 // SetupRoutes crea los adaptadores, el servicio y registra las rutas. No arranca el servidor.
 // queue se usará desde la Fase 3/5 (despacho de entregas).
 func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, _ ports.TaskQueue,
-	tournamentRepo ports.TournamentRepository, cfgSvc ports.ConfigUseCase) {
+	tournamentRepo ports.TournamentRepository, importer *app.ImportService, cfgSvc ports.ConfigUseCase) {
 	// 1. Instanciar Adaptadores (Repositorios y APIs Externas)
 	pdfs := pdfgen.New(pdfgen.PDFDir) // generador y a la vez DocumentStore
 	waAPI := whatsapp.New(cfg.WhatsApp.Token, cfg.WhatsApp.PhoneID, cfg.WhatsApp.APIVersion)
@@ -26,7 +26,7 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, _ ports.T
 	chatwootClient := chatwoot.New(cfg.Chatwoot.URL, cfg.Chatwoot.AccountID, cfg.Chatwoot.InboxID,
 		cfg.Chatwoot.Token, httpx.New(httpx.ShortTimeout))
 
-	visoriaService := app.NewVisoriaService(tournamentRepo, pdfs, pdfs, waAPI, chatwootClient, app.Options{
+	visoriaService := app.NewVisoriaService(tournamentRepo, pdfs, pdfs, waAPI, chatwootClient, importer, app.Options{
 		BaseURL:       cfg.BaseURL,
 		WhatsAppPause: cfg.WhatsAppPause,
 	})
