@@ -7,10 +7,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func InitRouter(r *gin.Engine, handler *handlers.VisoriaHandler) {
-	// Configuración de CORS profesional
+func InitRouter(r *gin.Engine, handler *handlers.VisoriaHandler, allowedOrigins []string) {
+	// CORS restringido a orígenes explícitos (el frontend es same-origin, así que
+	// en producción basta con BASE_URL). Nunca "*" junto con credenciales.
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:8880", "*"},
+		AllowOrigins:     allowedOrigins,
 		AllowMethods:     []string{"POST", "GET", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		AllowCredentials: true,
