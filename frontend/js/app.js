@@ -18,22 +18,37 @@ async function goToStep(step) {
         btn.innerHTML = "Cargando configuración...";
         btn.disabled = true;
 
+        const restoreButton = () => { btn.innerHTML = originalText; btn.disabled = false; };
         try {
             // La URL de la hoja la gestiona el servidor (entorno o la última guardada).
-            const response = await fetch(`${API_URL}/config/sync`, { method: 'POST' });
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({}));
-                throw new Error(err.error || "No se pudo sincronizar la configuración");
+            const result = await syncConfig();
+            if (!result.ok) {
+                // Si ya hay una configuración válida vigente se puede continuar con ella;
+                // si no, se abre la pantalla de configuración con el motivo.
+                const current = await getConfig().catch(() => null);
+                const puedeContinuar = result.status !== 400 && current && current.sincronizada;
+                if (!puedeContinuar) {
+                    restoreButton();
+                    openConfigPanel(result);
+                    return;
+                }
+                const sigue = confirm(
+                    (result.data.error || "No se pudo actualizar la configuración.") +
+                    `\n\nSe usará la última configuración válida (versión ${current.version}, ` +
+                    `${new Date(current.sincronizada_en).toLocaleString('es-CO')}).\n¿Continuar?`);
+                if (!sigue) {
+                    restoreButton();
+                    openConfigPanel(result);
+                    return;
+                }
             }
-
-            console.log("Cerebro cargado con éxito.");
+            console.log("Configuración maestra lista.");
         } catch (error) {
             alert("Error al cargar configuración: " + error.message);
-            btn.innerHTML = originalText;
-            btn.disabled = false;
+            restoreButton();
             return; // No lo dejamos avanzar si falla
         }
-        
+
         btn.innerHTML = originalText;
         btn.disabled = false;
     }

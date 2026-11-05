@@ -77,3 +77,23 @@ function sendWhatsAppMessages(players, onProgress) {
         .catch(err => reject(err));
     });
 }
+// --- Configuración maestra (Google Sheets) ---
+async function getConfig() {
+    const response = await fetch(`${API_URL}/config`);
+    if (!response.ok) throw new Error('No se pudo leer la configuración');
+    return await response.json();
+}
+
+// Sincroniza la configuración. Devuelve { ok, status, data } sin lanzar por 4xx/5xx
+// para que la pantalla pueda mostrar los hallazgos de una hoja inválida (422).
+// url es opcional: si se envía y la hoja es válida, queda como nueva fuente.
+async function syncConfig(url) {
+    const options = { method: 'POST' };
+    if (url) {
+        options.headers = { 'Content-Type': 'application/json' };
+        options.body = JSON.stringify({ url: url });
+    }
+    const response = await fetch(`${API_URL}/config/sync`, options);
+    const data = await response.json().catch(() => ({}));
+    return { ok: response.ok, status: response.status, data: data };
+}
