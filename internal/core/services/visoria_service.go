@@ -1,13 +1,9 @@
 package services
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"mime/multipart"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -15,7 +11,6 @@ import (
 
 	"visoria-control/internal/core/domain"
 	"visoria-control/internal/core/ports"
-	"visoria-control/internal/platform/httpx"
 	"visoria-control/internal/platform/log"
 
 	"github.com/xuri/excelize/v2"
@@ -24,29 +19,25 @@ import (
 // Options agrupa los valores de configuración que necesita el servicio
 // (los provee platform/config; el servicio no lee el entorno).
 type Options struct {
-	BaseURL         string
-	ChatwootURL     string
-	ChatwootToken   string
-	ChatwootAccount string
-	ChatwootInbox   int
-	WhatsAppPause   time.Duration
+	BaseURL       string
+	WhatsAppPause time.Duration
 }
 
 type visoriaService struct {
 	repo   ports.TournamentRepository
 	pdfGen ports.PDFGenerator
 	waAPI  ports.WhatsAppAPI
+	chat   ports.ChatwootClient
 	opts   Options
-	httpc  *http.Client // cliente compartido con timeout (Chatwoot)
 }
 
-func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, waAPI ports.WhatsAppAPI, opts Options) ports.VisoriaService {
+func NewVisoriaService(repo ports.TournamentRepository, pdfGen ports.PDFGenerator, waAPI ports.WhatsAppAPI, chat ports.ChatwootClient, opts Options) ports.VisoriaService {
 	return &visoriaService{
 		repo:   repo,
 		pdfGen: pdfGen,
 		waAPI:  waAPI,
+		chat:   chat,
 		opts:   opts,
-		httpc:  httpx.New(httpx.ShortTimeout),
 	}
 }
 
@@ -239,7 +230,7 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 			// 2. Notificación y autorregistro en Chatwoot
 			textoRegistro := fmt.Sprintf("📄 *Beca enviada por sistema*\n\nHola %s,\nTe hacemos entrega del documento oficial correspondiente a la beca del %s%% asignada a %s.\n\nPDF: %s", p.GuardianName, becaNum, p.Name, pdfURL)
 
-			if errCw := s.registrarEnChatwoot(phone, p.Name, textoRegistro); errCw != nil {
+			if errCw := s.chat.RegisterNote(ctx, phone, p.Name, textoRegistro); errCw != nil {
 				lg.Warn("whatsapp enviado pero no registrado en Chatwoot", "file_id", p.FileID, "error", errCw)
 			} else {
 				lg.Info("nota registrada en Chatwoot", "file_id", p.FileID)
@@ -247,189 +238,6 @@ func (s *visoriaService) DispatchWhatsAppMessages(ctx context.Context, players [
 		}
 
 		time.Sleep(s.opts.WhatsAppPause)
-	}
-
-	return nil
-}
-
-// registrarEnChatwoot busca o crea el contacto, asegura una conversación activa y registra el mensaje saliente
-func (s *visoriaService) registrarEnChatwoot(phone string, playerName string, messageContent string) error {
-	chatwootURL := s.opts.ChatwootURL
-	apiToken := s.opts.ChatwootToken
-	accountID := s.opts.ChatwootAccount
-	inboxID := s.opts.ChatwootInbox
-
-	client := s.httpc
-
-	// 1. Buscar contacto por número telefónico
-	searchURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/search?q=%s", chatwootURL, accountID, phone)
-	req, err := http.NewRequest("GET", searchURL, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("api_access_token", apiToken)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	var searchResult struct {
-		Payload []struct {
-			ID int `json:"id"`
-		} `json:"payload"`
-	}
-
-	var contactID int
-	if json.NewDecoder(resp.Body).Decode(&searchResult) == nil && len(searchResult.Payload) > 0 {
-		contactID = searchResult.Payload[0].ID
-	}
-
-	// 2. Si el contacto no existe, crearlo automáticamente
-	if contactID == 0 {
-		createContactURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts", chatwootURL, accountID)
-		contactPayload := map[string]interface{}{
-			"phone_number": "+" + phone,
-			"name":         playerName,
-			"inbox_id":     inboxID,
-		}
-		bodyBytes, _ := json.Marshal(contactPayload)
-		reqCreate, err := http.NewRequest("POST", createContactURL, bytes.NewBuffer(bodyBytes))
-		if err != nil {
-			return fmt.Errorf("error creando petición de contacto: %w", err)
-		}
-		reqCreate.Header.Set("Content-Type", "application/json")
-		reqCreate.Header.Set("api_access_token", apiToken)
-
-		respCreate, err := client.Do(reqCreate)
-		if err != nil {
-			return fmt.Errorf("error al conectar con Chatwoot para crear contacto: %w", err)
-		}
-		defer respCreate.Body.Close()
-
-		respBodyBytes, errRead := io.ReadAll(respCreate.Body)
-		if errRead != nil {
-			return fmt.Errorf("error leyendo respuesta de Chatwoot: %w", errRead)
-		}
-
-		log.FromContext(context.Background()).Debug("chatwoot: crear contacto", "status", respCreate.StatusCode)
-
-		if respCreate.StatusCode >= 400 {
-			return fmt.Errorf("chatwoot rechazó la creación (HTTP %d): %s", respCreate.StatusCode, string(respBodyBytes))
-		}
-
-		var createResult struct {
-			Payload struct {
-				Contact struct {
-					ID int `json:"id"`
-				} `json:"contact"`
-				ID int `json:"id"`
-			} `json:"payload"`
-			Contact struct {
-				ID int `json:"id"`
-			} `json:"contact"`
-			ID int `json:"id"`
-		}
-
-		if err := json.Unmarshal(respBodyBytes, &createResult); err != nil {
-			return fmt.Errorf("error decodificando respuesta de Chatwoot: %w", err)
-		}
-
-		if createResult.Payload.Contact.ID != 0 {
-			contactID = createResult.Payload.Contact.ID
-		} else if createResult.Payload.ID != 0 {
-			contactID = createResult.Payload.ID
-		} else if createResult.Contact.ID != 0 {
-			contactID = createResult.Contact.ID
-		} else if createResult.ID != 0 {
-			contactID = createResult.ID
-		}
-
-		if contactID == 0 {
-			return fmt.Errorf("no se pudo extraer el ID del contacto del JSON recibido: %s", string(respBodyBytes))
-		}
-	}
-
-	// 3. Obtener las conversaciones del contacto
-	convURL := fmt.Sprintf("%s/api/v1/accounts/%s/contacts/%d/conversations", chatwootURL, accountID, contactID)
-	reqConv, err := http.NewRequest("GET", convURL, nil)
-	if err != nil {
-		return err
-	}
-	reqConv.Header.Set("api_access_token", apiToken)
-
-	respConv, err := client.Do(reqConv)
-	if err != nil {
-		return err
-	}
-	defer respConv.Body.Close()
-
-	var convResult struct {
-		Payload []struct {
-			ID int `json:"id"`
-		} `json:"payload"`
-	}
-
-	var conversationID int
-	if json.NewDecoder(respConv.Body).Decode(&convResult) == nil && len(convResult.Payload) > 0 {
-		conversationID = convResult.Payload[0].ID
-	}
-
-	// 4. Si no tiene una conversación activa, crear una nueva
-	if conversationID == 0 {
-		createConvURL := fmt.Sprintf("%s/api/v1/accounts/%s/conversations", chatwootURL, accountID)
-		convPayload := map[string]interface{}{
-			"contact_id": contactID,
-			"inbox_id":   inboxID,
-		}
-		bodyBytes, _ := json.Marshal(convPayload)
-		reqConvCreate, err := http.NewRequest("POST", createConvURL, bytes.NewBuffer(bodyBytes))
-		if err != nil {
-			return fmt.Errorf("error creando petición de conversación: %w", err)
-		}
-		reqConvCreate.Header.Set("Content-Type", "application/json")
-		reqConvCreate.Header.Set("api_access_token", apiToken)
-
-		respConvCreate, err := client.Do(reqConvCreate)
-		if err != nil {
-			return fmt.Errorf("error al conectar con Chatwoot para crear conversación: %w", err)
-		}
-		defer respConvCreate.Body.Close()
-
-		var newConv struct {
-			ID int `json:"id"`
-		}
-		if err := json.NewDecoder(respConvCreate.Body).Decode(&newConv); err != nil || newConv.ID == 0 {
-			return fmt.Errorf("no se pudo crear la conversación en Chatwoot")
-		}
-		conversationID = newConv.ID
-	}
-
-	// 5. Registrar el mensaje saliente en la conversación
-	msgURL := fmt.Sprintf("%s/api/v1/accounts/%s/conversations/%d/messages", chatwootURL, accountID, conversationID)
-	msgPayload := map[string]interface{}{
-		"content":      messageContent,
-		"message_type": "outgoing",
-		"private":      true, // nota interna: nunca se envía al acudiente (D7)
-	}
-
-	bodyBytes, _ := json.Marshal(msgPayload)
-	reqMsg, err := http.NewRequest("POST", msgURL, bytes.NewBuffer(bodyBytes))
-	if err != nil {
-		return err
-	}
-	reqMsg.Header.Set("Content-Type", "application/json")
-	reqMsg.Header.Set("api_access_token", apiToken)
-
-	respMsg, err := client.Do(reqMsg)
-	if err != nil {
-		return err
-	}
-	defer respMsg.Body.Close()
-
-	if respMsg.StatusCode >= 400 {
-		return fmt.Errorf("respuesta de Chatwoot API: HTTP %d", respMsg.StatusCode)
 	}
 
 	return nil

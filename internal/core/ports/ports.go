@@ -21,6 +21,12 @@ type WhatsAppAPI interface {
 	SendTemplate(ctx context.Context, phone string, templateName string, language string, components []interface{}) error
 }
 
+// ChatwootClient deja constancia en Chatwoot de lo enviado al acudiente.
+// La implementación publica una NOTA PRIVADA (nunca un mensaje al acudiente).
+type ChatwootClient interface {
+	RegisterNote(ctx context.Context, phone, contactName, content string) error
+}
+
 // Service: Lo que el Handler puede pedirle al negocio
 type VisoriaService interface {
 	LoadMasterConfig(ctx context.Context, csvURL string) error

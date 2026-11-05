@@ -4,11 +4,13 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"visoria-control/internal/adapters/chatwoot"
 	"visoria-control/internal/adapters/external"
 	"visoria-control/internal/adapters/handlers"
 	"visoria-control/internal/adapters/repository"
 	"visoria-control/internal/core/services"
 	"visoria-control/internal/platform/config"
+	"visoria-control/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
 )
@@ -21,13 +23,12 @@ func InitServer(r *gin.Engine, cfg *config.Config) {
 	waAPI := external.NewWhatsAppAPI(cfg.WhatsApp.Token, cfg.WhatsApp.PhoneID, cfg.WhatsApp.APIVersion)
 
 	// 2. Instanciar el Servicio (Negocio) inyectando los puertos
-	visoriaService := services.NewVisoriaService(tournamentRepo, pdfGen, waAPI, services.Options{
-		BaseURL:         cfg.BaseURL,
-		ChatwootURL:     cfg.Chatwoot.URL,
-		ChatwootToken:   cfg.Chatwoot.Token,
-		ChatwootAccount: cfg.Chatwoot.AccountID,
-		ChatwootInbox:   cfg.Chatwoot.InboxID,
-		WhatsAppPause:   cfg.WhatsAppPause,
+	chatwootClient := chatwoot.New(cfg.Chatwoot.URL, cfg.Chatwoot.AccountID, cfg.Chatwoot.InboxID,
+		cfg.Chatwoot.Token, httpx.New(httpx.ShortTimeout))
+
+	visoriaService := services.NewVisoriaService(tournamentRepo, pdfGen, waAPI, chatwootClient, services.Options{
+		BaseURL:       cfg.BaseURL,
+		WhatsAppPause: cfg.WhatsAppPause,
 	})
 
 	// 3. Instanciar Handlers inyectando el servicio
