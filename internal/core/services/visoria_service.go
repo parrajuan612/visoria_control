@@ -405,7 +405,7 @@ func (s *visoriaService) registrarEnChatwoot(phone string, playerName string, me
 	msgPayload := map[string]interface{}{
 		"content":      messageContent,
 		"message_type": "outgoing",
-		"private":      false,
+		"private":      true, // nota interna: nunca se envía al acudiente (D7)
 	}
 
 	bodyBytes, _ := json.Marshal(msgPayload)
