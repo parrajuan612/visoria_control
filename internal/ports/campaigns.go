@@ -3,6 +3,7 @@ package ports
 import (
 	"context"
 	"errors"
+	"io"
 
 	"visoria-control/internal/domain"
 )
@@ -10,6 +11,8 @@ import (
 var (
 	ErrCampaignNotFound  = errors.New("campaña no encontrada")
 	ErrRecipientNotFound = errors.New("destinatario no encontrado")
+	// ErrNoPDFs: la campaña aún no tiene propuestas en PDF para descargar.
+	ErrNoPDFs = errors.New("Esta campaña todavía no tiene propuestas en PDF generadas.")
 	// ErrCampaignLocked: la campaña ya no admite correcciones (se está enviando o terminó).
 	ErrCampaignLocked = errors.New("la campaña ya no se puede editar")
 	// ErrGenerationRunning: ya se están generando las propuestas de la campaña.
@@ -83,4 +86,7 @@ type CampaignUseCase interface {
 	Get(ctx context.Context, id string) (CampaignDetail, error)
 	List(ctx context.Context) ([]domain.CampaignView, error)
 	EditRecipient(ctx context.Context, campaignID, recipientID string, patch domain.RecipientPatch, by string) (EditResult, error)
+	// ExportPDFs escribe en w un .zip con los PDF ya generados de la campaña y devuelve cuántos incluyó.
+	// Devuelve ErrNoPDFs (sin escribir nada) si todavía no hay ninguno.
+	ExportPDFs(ctx context.Context, campaignID string, w io.Writer) (int, error)
 }

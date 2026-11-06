@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"path/filepath"
 	"regexp"
@@ -49,7 +50,7 @@ func (h *CampaignHandler) fail(c *gin.Context, err error) {
 	case errors.As(err, &tooBig):
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "El archivo supera el tamaño máximo de 10 MB."})
 	case errors.Is(err, ports.ErrNoConfig), errors.Is(err, ports.ErrCampaignLocked), errors.Is(err, ports.ErrGenerationRunning),
-		errors.Is(err, ports.ErrDispatchRunning), errors.Is(err, ports.ErrCampaignPaused):
+		errors.Is(err, ports.ErrDispatchRunning), errors.Is(err, ports.ErrCampaignPaused), errors.Is(err, ports.ErrNoPDFs):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	case errors.Is(err, ports.ErrInvalidSpreadsheet):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
@@ -267,4 +268,41 @@ func (h *CampaignHandler) Deliveries(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, snap)
+}
+
+// localOnly: la API aún no tiene login y el ZIP reúne datos de menores, así que solo se
+// atiende desde la propia máquina. Se mira la dirección REAL de la conexión (no X-Forwarded-For,
+// que cualquiera puede falsificar) y se rechaza lo que llegue por un proxy: detrás de nginx la
+// conexión también parece local y el ZIP quedaría expuesto.
+func localOnly(r *http.Request) bool {
+	if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "" || r.Header.Get("Forwarded") != "" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// PDFsZip: GET /api/v1/campaigns/:id/pdfs.zip — descarga todos los PDF generados (solo desde localhost).
+func (h *CampaignHandler) PDFsZip(c *gin.Context) {
+	if !localOnly(c.Request) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "La descarga del ZIP solo está disponible desde el equipo donde corre la aplicación."})
+		return
+	}
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	// Se arma en memoria: si algo falla a medias se responde un error limpio y no un ZIP corrupto.
+	var buf bytes.Buffer
+	if _, err := h.uc.ExportPDFs(c.Request.Context(), id, &buf); err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.Header("Content-Disposition", `attachment; filename="propuestas_`+id+`.zip"`)
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "application/zip", buf.Bytes())
 }

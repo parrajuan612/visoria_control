@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime/multipart"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -26,6 +28,7 @@ type fakeCamp struct {
 	gotIDs    [2]string
 	gotBy     string
 	list      []domain.CampaignView
+	zipErr    error
 }
 
 func (f *fakeCamp) Create(_ context.Context, in ports.CreateCampaignInput) (ports.CampaignDetail, error) {
@@ -41,6 +44,14 @@ func (f *fakeCamp) EditRecipient(_ context.Context, cid, rid string, p domain.Re
 	return ports.EditResult{Recipient: domain.Recipient{ID: rid, Estado: domain.RecipientValid}, Otros: []domain.Recipient{}}, f.editErr
 }
 
+func (f *fakeCamp) ExportPDFs(_ context.Context, _ string, w io.Writer) (int, error) {
+	if f.zipErr != nil {
+		return 0, f.zipErr
+	}
+	_, _ = w.Write([]byte("PKfake"))
+	return 1, nil
+}
+
 func router(f *fakeCamp) *gin.Engine { return routerDocs(f, fakeDocs{}) }
 
 func routerDocs(f *fakeCamp, d fakeDocs) *gin.Engine {
@@ -54,6 +65,7 @@ func routerDocs(f *fakeCamp, d fakeDocs) *gin.Engine {
 	r.POST("/campaigns/:id/retry", h.Retry)
 	r.POST("/campaigns/:id/resume", h.Resume)
 	r.GET("/campaigns/:id/deliveries", h.Deliveries)
+	r.GET("/campaigns/:id/pdfs.zip", h.PDFsZip)
 	r.PATCH("/campaigns/:id/recipients/:rid", h.EditRecipient)
 	r.POST("/campaigns/:id/documents", h.Documents)
 	return r
@@ -357,5 +369,44 @@ func TestDispatchEndpoints(t *testing.T) {
 	d.err = ports.ErrCampaignPaused
 	if code, out := call(r, "POST", "/campaigns/c1/retry", nil, ""); code != 409 || !strings.Contains(out["error"].(string), "pausa") {
 		t.Errorf("pausada: %d %v", code, out)
+	}
+}
+
+func TestPDFsZipSoloLocal(t *testing.T) {
+	get := func(f *fakeCamp, remote string, hdr map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/campaigns/abc/pdfs.zip", nil)
+		req.RemoteAddr = remote
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		router(f).ServeHTTP(w, req)
+		return w
+	}
+	if w := get(&fakeCamp{}, "127.0.0.1:5555", nil); w.Code != 200 || w.Header().Get("Content-Type") != "application/zip" ||
+		!strings.Contains(w.Header().Get("Content-Disposition"), "attachment") {
+		t.Fatalf("loopback debe descargar: %d %v", w.Code, w.Header())
+	}
+	if w := get(&fakeCamp{}, "[::1]:5555", nil); w.Code != 200 {
+		t.Fatalf("::1 debe descargar: %d", w.Code)
+	}
+	for name, c := range map[string]struct {
+		remote string
+		hdr    map[string]string
+	}{
+		"IP de la red":        {"192.168.1.20:4000", nil},
+		"IP pública":          {"8.8.8.8:4000", nil},
+		"proxy (nginx local)": {"127.0.0.1:5555", map[string]string{"X-Forwarded-For": "8.8.8.8"}},
+		"X-Real-IP":           {"127.0.0.1:5555", map[string]string{"X-Real-IP": "8.8.8.8"}},
+	} {
+		if w := get(&fakeCamp{}, c.remote, c.hdr); w.Code != http.StatusForbidden {
+			t.Errorf("%s: esperaba 403, fue %d", name, w.Code)
+		}
+	}
+	if w := get(&fakeCamp{zipErr: ports.ErrNoPDFs}, "127.0.0.1:1", nil); w.Code != http.StatusConflict {
+		t.Errorf("sin PDFs: esperaba 409, fue %d", w.Code)
+	}
+	if w := get(&fakeCamp{zipErr: ports.ErrCampaignNotFound}, "127.0.0.1:1", nil); w.Code != http.StatusNotFound {
+		t.Errorf("campaña inexistente: esperaba 404, fue %d", w.Code)
 	}
 }

@@ -129,6 +129,14 @@
             'bg-blue-600 hover:bg-blue-700 text-white', doGenerate);
         b.disabled = st.busy || gen || ['DISPATCHING', 'COMPLETED', 'PAUSED'].includes(status()) || (ready && bad.length === 0);
         parts.push(b);
+        if (done.length > 0) {
+            // Descarga directa (el navegador maneja el archivo). Solo funciona desde el equipo donde corre la app.
+            const a = node('a', 'inline-block ml-3 px-4 py-2 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50', `Descargar ZIP (${done.length} PDF)`);
+            a.href = `${API_URL}/campaigns/${encodeURIComponent(st.id)}/pdfs.zip`;
+            a.setAttribute('download', '');
+            parts.push(a);
+            parts.push(node('p', 'text-xs text-gray-500 mt-2', 'El ZIP contiene datos de menores y solo se puede descargar desde el computador donde corre la aplicación.'));
+        }
         if (bad.length) {
             const ul = node('ul', 'mt-3 space-y-1 text-sm');
             bad.forEach(r => ul.append(node('li', 'text-red-700', `Fila ${r.fila} · ${r.jugador}: ${r.documento.error}`)));
