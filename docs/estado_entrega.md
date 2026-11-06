@@ -7,7 +7,7 @@
 | Subir Excel, validar y editar celdas en la tabla | Hecho y probado |
 | Generar PDF desde las 3 plantillas Word (LibreOffice) | Hecho y probado |
 | Envío por **WhatsApp** (`purchase_receipt_3`) | Hecho. Probado con un envío real: Meta lo aceptó |
-| Envío por **correo** (Gmail SMTP) | Hecho y probado con servidor simulado. **Falta la prueba real** (necesita la contraseña de aplicación) |
+| Envío por **correo** (Gmail SMTP) | Hecho. Prueba real con Gmail hecha el 2026-11-05 (ver sección 4) |
 | Pantalla del paso 3 (progreso, reenviar, reanudar) | Hecho |
 | Entregado/Leído de WhatsApp, rebotes de correo, recordatorios, login | **No incluido** (ver `docs/operacion.md`) |
 
@@ -61,3 +61,10 @@ Copia desde el otro equipo: las 3 plantillas `.docx` y un Excel de prueba.
 - **Rotar** los tokens de WhatsApp y Chatwoot: estuvieron en el historial de git.
 - El historial contiene PDFs de menores (`uploads/pdfs`): reescribir el historial o hacer el repo privado.
 - La API no tiene login: úsala solo en red de confianza o tras nginx con contraseña.
+
+## 4. Registro de la verificación local (2026-11-05)
+- Entorno verificado: `.env` completo (con `DISPATCH_ALLOWLIST` activa), Redis sano en `127.0.0.1:6380`, app compilada y respondiendo en `:8880` (`/healthz` ok), colas docs/whatsapp/email en marcha y sin aviso de «correo deshabilitado».
+- Prueba de punta a punta con WhatsApp y correo reales, solo a los contactos de la allowlist: **resultado exitoso según lo reportado por el responsable**. Esta guía registra ese resultado; no lo comprobó de forma independiente quien la actualizó.
+- Recordatorio: «aceptado» significa que el proveedor recibió el mensaje, no que el acudiente lo recibió.
+- Antes de producción siguen pendientes los puntos de la sección 3 (rotar tokens, historial con datos de menores, API sin login) y quitar `DISPATCH_ALLOWLIST` (sección 2.7).
+
