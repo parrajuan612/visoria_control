@@ -41,6 +41,10 @@ type Config struct {
 	SMTP     SMTP
 	IMAP     IMAP
 
+	// Enlaces firmados a PDF/ZIP (LINK_SECRET, mínimo 16 caracteres; vacío = sin enlaces) y vigencia de los de Chatwoot.
+	LinkSecret  string
+	PDFLinkDays int
+
 	// Pausa entre envíos de WhatsApp (antes fija en 6 s en el código).
 	WhatsAppPause time.Duration
 }
@@ -173,12 +177,14 @@ func fromLookup(get func(string) string) (*Config, error) {
 	}
 
 	c := &Config{
-		Env:       str("APP_ENV", "development"),
-		Port:      str("PORT", "8880"),
-		LogLevel:  str("LOG_LEVEL", "info"),
-		DataDir:   str("DATA_DIR", "data"),
-		BaseURL:   strings.TrimRight(required("BASE_URL"), "/"),
-		SheetsURL: str("SHEETS_CSV_URL", ""),
+		Env:         str("APP_ENV", "development"),
+		Port:        str("PORT", "8880"),
+		LogLevel:    str("LOG_LEVEL", "info"),
+		DataDir:     str("DATA_DIR", "data"),
+		BaseURL:     strings.TrimRight(required("BASE_URL"), "/"),
+		SheetsURL:   str("SHEETS_CSV_URL", ""),
+		LinkSecret:  str("LINK_SECRET", ""),
+		PDFLinkDays: integer("PDF_LINK_DAYS", 30),
 		WhatsApp: WhatsApp{
 			Token:      required("WHATSAPP_TOKEN"),
 			PhoneID:    required("WHATSAPP_PHONE_ID"),

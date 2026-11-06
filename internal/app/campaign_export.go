@@ -65,3 +65,29 @@ func (s *CampaignService) ExportPDFs(ctx context.Context, campaignID string, w i
 	}
 	return n, zw.Close()
 }
+
+// RecipientPDF implementa ports.CampaignUseCase.
+func (s *CampaignService) RecipientPDF(ctx context.Context, campaignID, recipientID string) ([]byte, string, error) {
+	c, err := s.repo.Get(ctx, campaignID)
+	if err != nil {
+		return nil, "", err
+	}
+	recs, err := s.repo.Recipients(ctx, campaignID)
+	if err != nil {
+		return nil, "", err
+	}
+	for _, r := range recs {
+		if r.ID != recipientID {
+			continue
+		}
+		if r.Documento == nil || r.Documento.Path == "" || r.Documento.Error != "" {
+			return nil, "", ports.ErrRecipientNotFound
+		}
+		data, err := s.files.ReadPDF(ctx, c, r.Documento.Path)
+		if err != nil {
+			return nil, "", fmt.Errorf("leyendo el PDF: %w", err)
+		}
+		return data, domain.VisibleFileNames(recs)[r.ID], nil
+	}
+	return nil, "", ports.ErrRecipientNotFound
+}

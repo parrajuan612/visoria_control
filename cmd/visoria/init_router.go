@@ -48,6 +48,8 @@ func InitRouter(r *gin.Engine, h handlers, allowedOrigins []string) {
 		v1.POST("/campaigns/:id/resume", h.campaigns.Resume)
 		v1.GET("/campaigns/:id/deliveries", h.campaigns.Deliveries)
 		v1.GET("/campaigns/:id/pdfs.zip", h.campaigns.PDFsZip)
+		v1.POST("/campaigns/:id/pdfs-link", h.campaigns.ZipLink)
+		v1.GET("/campaigns/:id/recipients/:rid/pdf", h.campaigns.PDFFile)
 
 		// Plantillas Word
 		v1.GET("/templates", h.templates.List)

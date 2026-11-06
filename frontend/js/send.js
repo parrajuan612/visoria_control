@@ -130,12 +130,16 @@
         b.disabled = st.busy || gen || ['DISPATCHING', 'COMPLETED', 'PAUSED'].includes(status()) || (ready && bad.length === 0);
         parts.push(b);
         if (done.length > 0) {
-            // Descarga directa (el navegador maneja el archivo). Solo funciona desde el equipo donde corre la app.
-            const a = node('a', 'inline-block ml-3 px-4 py-2 rounded border border-gray-300 text-sm text-gray-700 hover:bg-gray-50', `Descargar ZIP (${done.length} PDF)`);
-            a.href = `${API_URL}/campaigns/${encodeURIComponent(st.id)}/pdfs.zip`;
-            a.setAttribute('download', '');
-            parts.push(a);
-            parts.push(node('p', 'text-xs text-gray-500 mt-2', 'El ZIP contiene datos de menores y solo se puede descargar desde el computador donde corre la aplicación.'));
+            // Se pide un enlace firmado y de corta vida: detrás de nginx el servidor no ve la conexión como local.
+            const z = btn(`Descargar ZIP (${done.length} PDF)`, 'ml-3 border border-gray-300 text-gray-700 hover:bg-gray-50 bg-white', async () => {
+                z.disabled = true;
+                const r = await createPdfsLink(st.id).catch(() => ({ ok: false, data: { error: 'No se pudo conectar con el servidor.' } }));
+                z.disabled = false;
+                if (r.ok) { window.location.assign(r.data.url); }
+                else { st.msg = { kind: 'error', text: r.data.error || 'No se pudo preparar la descarga.' }; render(); }
+            });
+            parts.push(z);
+            parts.push(node('p', 'text-xs text-gray-500 mt-2', 'El ZIP contiene datos de menores: guárdelo en un lugar seguro y bórrelo cuando ya no lo necesite.'));
         }
         if (bad.length) {
             const ul = node('ul', 'mt-3 space-y-1 text-sm');

@@ -36,6 +36,8 @@ type DispatchDeps struct {
 	Email      ports.EmailSender    // nil = canal deshabilitado
 	Composer   ports.MailComposer
 	Chatwoot   ports.ChatwootClient
+	// PDFLink devuelve el enlace firmado para ver el PDF de un destinatario ("" = sin enlaces configurados).
+	PDFLink    func(campaignID, recipientID string) string
 	Quota      ports.QuotaStore
 	WALimit    ports.Limiter
 	EmailLimit ports.Limiter
@@ -714,6 +716,11 @@ func (s *DispatchService) traceNote(ctx context.Context, r *run, providerID stri
 		fmt.Fprintf(&b, "• Total: %s · Pagos: %s\n", domain.FormatEUR(beca.Total), strings.Join(pagos, "; "))
 	}
 	fmt.Fprintf(&b, "• PDF enviado: %s", s.visibleName(ctx, r))
+	if s.d.PDFLink != nil {
+		if u := s.d.PDFLink(c.ID, rec.ID); u != "" {
+			fmt.Fprintf(&b, "\n• Ver PDF: %s", u)
+		}
+	}
 	return b.String()
 }
 

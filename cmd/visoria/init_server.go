@@ -3,6 +3,7 @@ package main
 import (
 	httpadapter "visoria-control/internal/adapters/http"
 	"visoria-control/internal/platform/config"
+	"visoria-control/internal/platform/signedurl"
 	"visoria-control/internal/ports"
 
 	"github.com/gin-gonic/gin"
@@ -23,7 +24,7 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config, rdb *redis.Client, s service
 	r.GET("/healthz", Healthz(rdb))
 	InitRouter(r, handlers{
 		config:    httpadapter.NewConfigHandler(s.config),
-		campaigns: httpadapter.NewCampaignHandler(s.campaigns, s.documents, s.dispatch),
+		campaigns: httpadapter.NewCampaignHandler(s.campaigns, s.documents, s.dispatch).WithLinks(signedurl.New(cfg.LinkSecret)),
 		templates: httpadapter.NewTemplateHandler(s.templates),
 	}, cfg.CORSOrigins)
 }

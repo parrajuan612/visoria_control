@@ -89,4 +89,7 @@ type CampaignUseCase interface {
 	// ExportPDFs escribe en w un .zip con los PDF ya generados de la campaña y devuelve cuántos incluyó.
 	// Devuelve ErrNoPDFs (sin escribir nada) si todavía no hay ninguno.
 	ExportPDFs(ctx context.Context, campaignID string, w io.Writer) (int, error)
+	// RecipientPDF devuelve el PDF de un destinatario y el nombre visible del archivo.
+	// ErrRecipientNotFound si no existe o todavía no tiene PDF.
+	RecipientPDF(ctx context.Context, campaignID, recipientID string) (data []byte, filename string, err error)
 }

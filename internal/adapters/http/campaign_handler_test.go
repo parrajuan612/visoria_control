@@ -11,8 +11,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"visoria-control/internal/domain"
+	"visoria-control/internal/platform/signedurl"
 	"visoria-control/internal/ports"
 
 	"github.com/gin-gonic/gin"
@@ -52,6 +54,13 @@ func (f *fakeCamp) ExportPDFs(_ context.Context, _ string, w io.Writer) (int, er
 	return 1, nil
 }
 
+func (f *fakeCamp) RecipientPDF(_ context.Context, _, rid string) ([]byte, string, error) {
+	if rid == "sinpdf" {
+		return nil, "", ports.ErrRecipientNotFound
+	}
+	return []byte("%PDF-fake"), "JUGADOR - BECA 50.pdf", nil
+}
+
 func router(f *fakeCamp) *gin.Engine { return routerDocs(f, fakeDocs{}) }
 
 func routerDocs(f *fakeCamp, d fakeDocs) *gin.Engine {
@@ -68,6 +77,18 @@ func routerDocs(f *fakeCamp, d fakeDocs) *gin.Engine {
 	r.GET("/campaigns/:id/pdfs.zip", h.PDFsZip)
 	r.PATCH("/campaigns/:id/recipients/:rid", h.EditRecipient)
 	r.POST("/campaigns/:id/documents", h.Documents)
+	return r
+}
+
+// routerLinks: el mismo router pero con enlaces firmados activos y reloj controlado.
+func routerLinks(f *fakeCamp, secret string, now time.Time) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewCampaignHandler(f, fakeDocs{}, fakeDispatch).WithLinks(signedurl.New(secret))
+	h.now = func() time.Time { return now }
+	r.GET("/campaigns/:id/pdfs.zip", h.PDFsZip)
+	r.POST("/campaigns/:id/pdfs-link", h.ZipLink)
+	r.GET("/campaigns/:id/recipients/:rid/pdf", h.PDFFile)
 	return r
 }
 
@@ -408,5 +429,75 @@ func TestPDFsZipSoloLocal(t *testing.T) {
 	}
 	if w := get(&fakeCamp{zipErr: ports.ErrCampaignNotFound}, "127.0.0.1:1", nil); w.Code != http.StatusNotFound {
 		t.Errorf("campaña inexistente: esperaba 404, fue %d", w.Code)
+	}
+}
+
+func TestEnlacesFirmados(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	do := func(r *gin.Engine, method, url, remote string, hdr map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, url, nil)
+		req.RemoteAddr = remote
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+	proxy := map[string]string{"X-Forwarded-For": "8.8.8.8"} // detrás de nginx
+	rt := routerLinks(&fakeCamp{}, secret, now)
+
+	// ZIP: el panel pide un enlace y con él descarga aunque pase por nginx.
+	w := do(rt, http.MethodPost, "/campaigns/abc/pdfs-link", "127.0.0.1:1", proxy)
+	var out struct{ URL string }
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil || !strings.HasPrefix(out.URL, "/api/v1/campaigns/abc/pdfs.zip?t=") {
+		t.Fatalf("enlace del ZIP: %d %s", w.Code, w.Body)
+	}
+	tok := out.URL[strings.Index(out.URL, "t=")+2:]
+	if w := do(rt, http.MethodGet, "/campaigns/abc/pdfs.zip?t="+tok, "127.0.0.1:1", proxy); w.Code != 200 {
+		t.Errorf("con enlace firmado y proxy debe descargar: %d", w.Code)
+	}
+	if w := do(rt, http.MethodGet, "/campaigns/abc/pdfs.zip", "127.0.0.1:1", proxy); w.Code != http.StatusForbidden {
+		t.Errorf("sin enlace y con proxy debe negarse: %d", w.Code)
+	}
+	if w := do(rt, http.MethodGet, "/campaigns/otra/pdfs.zip?t="+tok, "127.0.0.1:1", proxy); w.Code != http.StatusForbidden {
+		t.Errorf("el enlace de una campaña no sirve para otra: %d", w.Code)
+	}
+	if w := do(routerLinks(&fakeCamp{}, secret, now.Add(time.Hour)), http.MethodGet, "/campaigns/abc/pdfs.zip?t="+tok, "8.8.8.8:1", nil); w.Code != http.StatusForbidden {
+		t.Errorf("enlace vencido: %d", w.Code)
+	}
+	if w := do(routerLinks(&fakeCamp{getErr: ports.ErrCampaignNotFound}, secret, now), http.MethodPost, "/campaigns/abc/pdfs-link", "127.0.0.1:1", nil); w.Code != http.StatusNotFound {
+		t.Errorf("campaña inexistente: %d", w.Code)
+	}
+	if w := do(routerLinks(&fakeCamp{}, "", now), http.MethodPost, "/campaigns/abc/pdfs-link", "127.0.0.1:1", nil); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "LINK_SECRET") {
+		t.Errorf("sin LINK_SECRET: %d %s", w.Code, w.Body)
+	}
+
+	// PDF de un destinatario (el enlace va en la nota de Chatwoot).
+	pdfTok := signedurl.New(secret).Token(PDFResource("abc", "r1"), now.Add(30*24*time.Hour))
+	w = do(rt, http.MethodGet, "/campaigns/abc/recipients/r1/pdf?t="+pdfTok, "8.8.8.8:1", nil)
+	if w.Code != 200 || w.Header().Get("Content-Type") != "application/pdf" || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "inline") ||
+		w.Header().Get("Cache-Control") != "private, no-store" || w.Body.String() != "%PDF-fake" {
+		t.Errorf("PDF firmado: %d %v", w.Code, w.Header())
+	}
+	for name, url := range map[string]string{
+		"sin token":         "/campaigns/abc/recipients/r1/pdf",
+		"otro destinatario": "/campaigns/abc/recipients/r2/pdf?t=" + pdfTok,
+		"otra campaña":      "/campaigns/zzz/recipients/r1/pdf?t=" + pdfTok,
+		"token del zip":     "/campaigns/abc/recipients/r1/pdf?t=" + tok,
+		"basura":            "/campaigns/abc/recipients/r1/pdf?t=1.2",
+	} {
+		if w := do(rt, http.MethodGet, url, "8.8.8.8:1", nil); w.Code != http.StatusForbidden {
+			t.Errorf("%s: esperaba 403, fue %d", name, w.Code)
+		}
+	}
+	other := signedurl.New(secret).Token(PDFResource("abc", "sinpdf"), now.Add(time.Hour))
+	if w := do(rt, http.MethodGet, "/campaigns/abc/recipients/sinpdf/pdf?t="+other, "8.8.8.8:1", nil); w.Code != http.StatusNotFound {
+		t.Errorf("sin PDF: %d", w.Code)
+	}
+	// Sin LINK_SECRET nada firmado vale.
+	if w := do(routerLinks(&fakeCamp{}, "", now), http.MethodGet, "/campaigns/abc/recipients/r1/pdf?t="+pdfTok, "8.8.8.8:1", nil); w.Code != http.StatusForbidden {
+		t.Errorf("sin secreto: %d", w.Code)
 	}
 }

@@ -15,6 +15,8 @@
 | `REDIS_ADDR`, `REDIS_PASSWORD` | Redis propio (compose: `127.0.0.1:6380`) |
 | `DATA_DIR` | Excel originales, PDF, plantillas y auditoría de cada campaña (contiene datos de menores) |
 | `SHEETS_CSV_URL` | Hoja de Google publicada como CSV (también se cambia desde la pantalla) |
+| `BASE_URL` | URL pública (la de nginx); se usa en el enlace al PDF de las notas de Chatwoot |
+| `LINK_SECRET`, `PDF_LINK_DAYS` | Secreto (`openssl rand -hex 32`) con el que se firman los enlaces y días de vigencia (30). Sin secreto no hay enlace al PDF en Chatwoot ni descarga del ZIP detrás de nginx |
 | `DISPATCH_ALLOWLIST` | **Para pruebas:** si se define, SOLO se envía a esos móviles/correos. Déjela vacía en producción |
 
 ## Arranque
@@ -48,3 +50,12 @@ Un solo proceso hace de API, worker y programador (`--roles=api,worker,scheduler
 - **Rebotes de correo:** llegan a la bandeja de Gmail y se corrigen a mano (no se detectan automáticamente).
 - **Sin recordatorios de pago automáticos** (siguiente fase).
 - Después de despachar, la campaña ya no se edita; para corregir un dato permanente cree una campaña nueva con esas filas.
+
+## Enlaces a PDF y nginx
+- La nota de Chatwoot incluye «Ver PDF», un enlace firmado (`/api/v1/campaigns/{id}/recipients/{rid}/pdf?t=…`) válido `PDF_LINK_DAYS` días. **La firma es la única credencial**: quien tenga el enlace ve esa propuesta (datos de un menor). Para que el agente de Chatwoot lo abra sin usuario y clave, esa ruta debe quedar **excluida de la autenticación básica de nginx**:
+  ```
+  location ~ ^/api/v1/campaigns/[^/]+/recipients/[^/]+/pdf$ { auth_basic off; proxy_pass http://127.0.0.1:8880; }
+  ```
+  El resto de la aplicación sigue protegido por nginx.
+- «Descargar ZIP» pide al servidor un enlace firmado de 10 minutos; así funciona detrás de nginx.
+- Cambiar `LINK_SECRET` invalida todos los enlaces ya emitidos.

@@ -5,14 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"visoria-control/internal/domain"
 	"visoria-control/internal/platform/log"
+	"visoria-control/internal/platform/signedurl"
 	"visoria-control/internal/ports"
 
 	"github.com/gin-gonic/gin"
@@ -33,10 +36,18 @@ type CampaignHandler struct {
 	uc       ports.CampaignUseCase
 	docs     ports.DocumentUseCase
 	dispatch ports.DispatchUseCase
+	links    *signedurl.Signer // nil = sin enlaces firmados (el ZIP queda solo para localhost)
+	now      func() time.Time
+}
+
+// WithLinks activa los enlaces firmados (ZIP del panel y PDF de las notas de Chatwoot).
+func (h *CampaignHandler) WithLinks(s *signedurl.Signer) *CampaignHandler {
+	h.links = s
+	return h
 }
 
 func NewCampaignHandler(uc ports.CampaignUseCase, docs ports.DocumentUseCase, dispatch ports.DispatchUseCase) *CampaignHandler {
-	return &CampaignHandler{uc: uc, docs: docs, dispatch: dispatch}
+	return &CampaignHandler{uc: uc, docs: docs, dispatch: dispatch, now: time.Now}
 }
 
 // fail traduce los errores de la aplicación a respuestas HTTP. Los errores internos no se
@@ -286,14 +297,15 @@ func localOnly(r *http.Request) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// PDFsZip: GET /api/v1/campaigns/:id/pdfs.zip — descarga todos los PDF generados (solo desde localhost).
+// PDFsZip: GET /api/v1/campaigns/:id/pdfs.zip — descarga todos los PDF generados (localhost o enlace firmado).
 func (h *CampaignHandler) PDFsZip(c *gin.Context) {
-	if !localOnly(c.Request) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "La descarga del ZIP solo está disponible desde el equipo donde corre la aplicación."})
-		return
-	}
 	id, ok := idParam(c, "id")
 	if !ok {
+		return
+	}
+	// Se permite desde el propio equipo (sin proxy) o con un enlace firmado y vigente (el que entrega el panel).
+	if !localOnly(c.Request) && !h.links.Valid("zip:"+id, c.Query("t"), h.now()) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Enlace no válido o vencido. Vuelva a pulsar «Descargar ZIP» en el panel."})
 		return
 	}
 	// Se arma en memoria: si algo falla a medias se responde un error limpio y no un ZIP corrupto.
@@ -305,4 +317,58 @@ func (h *CampaignHandler) PDFsZip(c *gin.Context) {
 	c.Header("Content-Disposition", `attachment; filename="propuestas_`+id+`.zip"`)
 	c.Header("Cache-Control", "no-store")
 	c.Data(http.StatusOK, "application/zip", buf.Bytes())
+}
+
+// zipLinkTTL: el enlace del ZIP vale lo justo para iniciar la descarga.
+const zipLinkTTL = 10 * time.Minute
+
+// ZipLink: POST /api/v1/campaigns/:id/pdfs-link — entrega una URL firmada y de corta vida para el ZIP.
+// Detrás de nginx la conexión nunca parece local; el panel pide este enlace y navega a él.
+func (h *CampaignHandler) ZipLink(c *gin.Context) {
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	if h.links == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Los enlaces de descarga no están configurados: defina LINK_SECRET (mínimo 16 caracteres) en el servidor."})
+		return
+	}
+	if _, err := h.uc.Get(c.Request.Context(), id); err != nil {
+		h.fail(c, err)
+		return
+	}
+	tok := h.links.Token("zip:"+id, h.now().Add(zipLinkTTL))
+	c.JSON(http.StatusOK, gin.H{"url": "/api/v1/campaigns/" + id + "/pdfs.zip?t=" + tok, "vence_en_minutos": int(zipLinkTTL.Minutes())})
+}
+
+// PDFResource es el recurso que firma el enlace de un PDF concreto (lo usan el handler y main.go).
+func PDFResource(campaignID, recipientID string) string {
+	return "pdf:" + campaignID + ":" + recipientID
+}
+
+// PDFFile: GET /api/v1/campaigns/:id/recipients/:rid/pdf?t=… — muestra el PDF de un destinatario.
+// El enlace firmado es la única credencial: lo abre quien atiende el chat en Chatwoot sin iniciar sesión.
+func (h *CampaignHandler) PDFFile(c *gin.Context) {
+	id, ok := idParam(c, "id")
+	if !ok {
+		return
+	}
+	rid, ok := idParam(c, "rid")
+	if !ok {
+		return
+	}
+	if !h.links.Valid(PDFResource(id, rid), c.Query("t"), h.now()) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Enlace no válido o vencido."})
+		return
+	}
+	data, name, err := h.uc.RecipientPDF(c.Request.Context(), id, rid)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.Header("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": name}))
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Data(http.StatusOK, "application/pdf", data)
 }

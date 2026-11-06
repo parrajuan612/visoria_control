@@ -73,6 +73,11 @@ function resumeCampaign(id) {
     return apiCall(`${API_URL}/campaigns/${encodeURIComponent(id)}/resume`, { method: 'POST' });
 }
 
+// URL firmada y de corta vida para descargar el ZIP con todos los PDF.
+function createPdfsLink(id) {
+    return apiCall(`${API_URL}/campaigns/${encodeURIComponent(id)}/pdfs-link`, { method: 'POST' });
+}
+
 function getDeliveries(id) {
     return apiCall(`${API_URL}/campaigns/${encodeURIComponent(id)}/deliveries`);
 }

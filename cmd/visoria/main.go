@@ -18,6 +18,7 @@ import (
 	"visoria-control/internal/adapters/docx"
 	"visoria-control/internal/adapters/email"
 	"visoria-control/internal/adapters/excel"
+	httpadapter "visoria-control/internal/adapters/http"
 	"visoria-control/internal/adapters/libreoffice"
 	"visoria-control/internal/adapters/redisstore"
 	"visoria-control/internal/adapters/sheets"
@@ -29,6 +30,7 @@ import (
 	"visoria-control/internal/platform/httpx"
 	"visoria-control/internal/platform/log"
 	"visoria-control/internal/platform/ratelimit"
+	"visoria-control/internal/platform/signedurl"
 	"visoria-control/internal/ports"
 
 	"github.com/gin-gonic/gin"
@@ -144,10 +146,22 @@ func run() int {
 		slog.Error("no se pudo preparar el repositorio de entregas", "error", err)
 		return 1
 	}
+	links := signedurl.New(cfg.LinkSecret)
+	if links == nil {
+		slog.Warn("LINK_SECRET no definido (mínimo 16 caracteres): las notas de Chatwoot no llevarán enlace al PDF y el ZIP solo se descargará desde localhost")
+	}
+	pdfLink := func(campaignID, recipientID string) string {
+		if links == nil || cfg.BaseURL == "" {
+			return ""
+		}
+		exp := time.Now().Add(time.Duration(cfg.PDFLinkDays) * 24 * time.Hour)
+		return cfg.BaseURL + "/api/v1/campaigns/" + campaignID + "/recipients/" + recipientID + "/pdf?t=" +
+			links.Token(httpadapter.PDFResource(campaignID, recipientID), exp)
+	}
 	dispatchSvc := app.NewDispatchService(app.DispatchDeps{
 		Repo: campaignRepo, Files: files, Deliveries: deliveries, Queue: queue, Events: redisstore.NewEventPublisher(rdb),
 		WhatsApp: waClient, Email: mailSender, Composer: email.Composer{S: email.DefaultSettings(cfg.SMTP.WhatsAppContact)},
-		Chatwoot: chatwootClient, Quota: redisstore.NewQuota(rdb),
+		Chatwoot: chatwootClient, PDFLink: pdfLink, Quota: redisstore.NewQuota(rdb),
 		WALimit: ratelimit.PerSecond(cfg.WhatsApp.RatePerSec), EmailLimit: ratelimit.Every(cfg.SMTP.Pause), Locks: campaignSvc,
 		Settings: app.DispatchSettings{WATemplate: cfg.WhatsApp.Template, WALanguage: cfg.WhatsApp.Language, EmailDaily: cfg.SMTP.DailyQuota, Allowlist: cfg.DispatchAllowlist},
 	})

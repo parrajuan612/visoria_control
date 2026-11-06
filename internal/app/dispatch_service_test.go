@@ -225,7 +225,7 @@ func newDispEnv(t *testing.T, mut func(*DispatchDeps)) *dispEnv {
 	e := &dispEnv{doc: d, deliv: newMemDeliveries(), wa: &fakeWA{sendErr: map[string]error{}}, mail: &fakeMail{}, quota: &fakeQuota{limit: 100}, chat: &fakeChatwoot{},
 		now: time.Date(2026, 11, 5, 15, 0, 0, 0, time.UTC)}
 	deps := DispatchDeps{Repo: d.camp.repo, Files: d.camp.files, Deliveries: e.deliv, Queue: d.queue, Events: d.events, WhatsApp: e.wa, Email: e.mail,
-		Composer: fakeComposer{}, Chatwoot: e.chat, Quota: e.quota, WALimit: noLimit{}, EmailLimit: noLimit{}, Locks: d.camp.svc,
+		Composer: fakeComposer{}, Chatwoot: e.chat, PDFLink: func(c, r string) string { return "https://x.test/pdf/" + c + "/" + r }, Quota: e.quota, WALimit: noLimit{}, EmailLimit: noLimit{}, Locks: d.camp.svc,
 		Settings: DispatchSettings{WATemplate: "purchase_receipt_3", WALanguage: "es_CO", EmailDaily: 100}}
 	if mut != nil {
 		mut(&deps)
@@ -522,7 +522,7 @@ func TestWhatsAppEnviaConElPDFSubidoComoMedio(t *testing.T) {
 			noteText = pl.Text
 		}
 	}
-	for _, want := range []string{"PROPUESTA ENVIADA por WhatsApp", "• Jugador: Jugador 1", "• Móvil: +573209323449", "• Beca: ", "Torneo: Copa Majestic", "• PDF enviado: "} {
+	for _, want := range []string{"PROPUESTA ENVIADA por WhatsApp", "• Jugador: Jugador 1", "• Móvil: +573209323449", "• Beca: ", "Torneo: Copa Majestic", "• PDF enviado: ", "• Ver PDF: https://x.test/pdf/"} {
 		if !strings.Contains(noteText, want) {
 			t.Errorf("la nota encolada no contiene %q:\n%s", want, noteText)
 		}
