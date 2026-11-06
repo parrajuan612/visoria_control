@@ -92,6 +92,13 @@ func (c *Client) RegisterNote(ctx context.Context, phone, contactName, content s
 	return nil
 }
 
+// Ping comprueba al arrancar que Chatwoot responde y que el token y la cuenta sirven (lista 1 contacto).
+// Sirve para avisar de inmediato si falta CHATWOOT_URL (por defecto apunta a localhost) en vez de enterarse
+// cuando ya no queda rastro de los envíos.
+func (c *Client) Ping(ctx context.Context) error {
+	return c.do(ctx, "comprobar acceso", http.MethodGet, "/contacts?page=1", nil, nil)
+}
+
 func (c *Client) findOrCreateContact(ctx context.Context, phone, name string) (int, error) {
 	// q codificado en URL; Chatwoot hace búsqueda parcial, por eso se exige coincidencia exacta.
 	var search struct {

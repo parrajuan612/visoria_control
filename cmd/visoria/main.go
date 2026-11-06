@@ -130,6 +130,15 @@ func run() int {
 		slog.Warn("DISPATCH_ALLOWLIST activa: SOLO se enviará a los móviles y correos de la lista", "entradas", len(cfg.DispatchAllowlist))
 	}
 	chatwootClient := chatwoot.New(cfg.Chatwoot.URL, cfg.Chatwoot.AccountID, cfg.Chatwoot.InboxID, cfg.Chatwoot.Token, httpx.New(httpx.ShortTimeout))
+	pingCtx, cancelPing := context.WithTimeout(ctx, 8*time.Second)
+	if err := chatwootClient.Ping(pingCtx); err != nil {
+		// No impide arrancar (las notas no bloquean los envíos), pero sin esto no queda rastro en Chatwoot.
+		slog.Warn("Chatwoot no responde: las notas de trazabilidad NO se registrarán; revise CHATWOOT_URL, CHATWOOT_API_TOKEN y CHATWOOT_ACCOUNT_ID",
+			"url", cfg.Chatwoot.URL, "error", err)
+	} else {
+		slog.Info("Chatwoot accesible", "url", cfg.Chatwoot.URL, "inbox_id", cfg.Chatwoot.InboxID)
+	}
+	cancelPing()
 	deliveries, err := redisstore.NewDeliveryRepo(rdb)
 	if err != nil {
 		slog.Error("no se pudo preparar el repositorio de entregas", "error", err)

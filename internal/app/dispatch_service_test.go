@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -512,6 +513,20 @@ func TestWhatsAppEnviaConElPDFSubidoComoMedio(t *testing.T) {
 		}
 	}
 	// Se registra una nota en Chatwoot (tarea aparte) y la entrega no depende de ella.
+	// El texto real encolado identifica al acudiente y la propuesta (nombre, móvil, beca, torneo, PDF, pagos).
+	var noteText string
+	for _, tk := range e.doc.queue.tasks {
+		if tk.Type == ports.TaskNote && strings.Contains(string(tk.Payload), "Jugador 1") {
+			var pl struct{ Text string }
+			_ = json.Unmarshal(tk.Payload, &pl)
+			noteText = pl.Text
+		}
+	}
+	for _, want := range []string{"PROPUESTA ENVIADA por WhatsApp", "• Jugador: Jugador 1", "• Móvil: +573209323449", "• Beca: ", "Torneo: Copa Majestic", "• PDF enviado: "} {
+		if !strings.Contains(noteText, want) {
+			t.Errorf("la nota encolada no contiene %q:\n%s", want, noteText)
+		}
+	}
 	e.chat.err = errors.New("chatwoot caído")
 	if errs := e.run(t, ports.TaskNote); len(errs) != 4 || errs[0] == nil {
 		t.Errorf("la nota debe fallar sin afectar la entrega: %v", errs)

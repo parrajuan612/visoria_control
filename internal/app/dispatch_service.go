@@ -666,13 +666,7 @@ func (s *DispatchService) afterAccepted(ctx context.Context, r *run, providerID 
 	if s.d.Chatwoot == nil || r.rec.Movil == "" {
 		return
 	}
-	beca := domain.BecaLabel(r.rec.Beca)
-	var text string
-	if r.ch == domain.ChannelWhatsApp {
-		text = fmt.Sprintf("📄 Propuesta de beca %s enviada por plantilla de WhatsApp (aceptada por Meta, wamid %s) · %s", beca, providerID, r.c.Torneo)
-	} else {
-		text = fmt.Sprintf("✉️ Propuesta de beca %s enviada por correo a %s (aceptada por el servidor) · %s", beca, strings.Join(r.rec.Correos, ", "), r.c.Torneo)
-	}
+	text := s.traceNote(ctx, r, providerID)
 	body, _ := json.Marshal(struct {
 		CampaignID  string `json:"campaign_id"`
 		RecipientID string `json:"recipient_id"`
@@ -682,6 +676,45 @@ func (s *DispatchService) afterAccepted(ctx context.Context, r *run, providerID 
 		TaskID: fmt.Sprintf("%s:note:%s:%s", r.c.ID, r.rec.ID, r.ch)}); err != nil && !errors.Is(err, ports.ErrDuplicateTask) {
 		r.lg.Warn("no se pudo encolar la nota de Chatwoot", "error", err)
 	}
+}
+
+// traceNote arma el mensaje de trazabilidad: quién es el acudiente y qué propuesta recibió, para que el
+// operador lo vea de inmediato si responde por el chat. Es una nota privada: el acudiente no la ve.
+func (s *DispatchService) traceNote(ctx context.Context, r *run, providerID string) string {
+	rec, c := r.rec, r.c
+	var b strings.Builder
+	if r.ch == domain.ChannelWhatsApp {
+		fmt.Fprintf(&b, "📄 PROPUESTA ENVIADA por WhatsApp (aceptada por Meta, wamid %s)\n", providerID)
+	} else {
+		b.WriteString("✉️ PROPUESTA ENVIADA por correo (aceptada por el servidor de correo)\n")
+	}
+	fmt.Fprintf(&b, "• Jugador: %s", rec.Jugador)
+	if rec.Club != "" {
+		fmt.Fprintf(&b, " (%s)", rec.Club)
+	}
+	fmt.Fprintf(&b, "\n• Acudiente: %s\n", rec.Acudiente)
+	if rec.Movil != "" {
+		fmt.Fprintf(&b, "• Móvil: +%s\n", rec.Movil)
+	}
+	if len(rec.Correos) > 0 {
+		fmt.Fprintf(&b, "• Correo: %s\n", strings.Join(rec.Correos, ", "))
+	}
+	fmt.Fprintf(&b, "• Beca: %s · Torneo: %s · Año de nacimiento: %d\n", domain.BecaLabel(rec.Beca), c.Torneo, rec.Anio)
+	if beca, ok := c.Config.Beca(rec.Beca); ok && len(beca.Pagos) > 0 {
+		pagos := make([]string, 0, len(beca.Pagos))
+		for i, p := range beca.Pagos {
+			item := fmt.Sprintf("%d) %s", i+1, domain.FormatEUR(p))
+			if i < len(c.FechasPago) {
+				if d, err := time.Parse("2006-01-02", c.FechasPago[i]); err == nil {
+					item += " el " + d.Format("02/01/2006")
+				}
+			}
+			pagos = append(pagos, item)
+		}
+		fmt.Fprintf(&b, "• Total: %s · Pagos: %s\n", domain.FormatEUR(beca.Total), strings.Join(pagos, "; "))
+	}
+	fmt.Fprintf(&b, "• PDF enviado: %s", s.visibleName(ctx, r))
+	return b.String()
 }
 
 // HandleNote publica la nota privada en Chatwoot. Un fallo no afecta el estado de la entrega.
