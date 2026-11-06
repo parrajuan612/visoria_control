@@ -41,7 +41,7 @@ type Config struct {
 	SMTP     SMTP
 	IMAP     IMAP
 
-	// Enlaces firmados a PDF/ZIP (LINK_SECRET, mínimo 16 caracteres; vacío = sin enlaces) y vigencia de los de Chatwoot.
+	// Enlaces firmados a PDF/ZIP (LINK_SECRET, mínimo 32 caracteres; vacío = sin enlaces) y vigencia de los de Chatwoot.
 	LinkSecret  string
 	PDFLinkDays int
 

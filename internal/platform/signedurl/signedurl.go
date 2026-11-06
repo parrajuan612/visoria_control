@@ -14,9 +14,13 @@ import (
 
 type Signer struct{ secret []byte }
 
+// MinSecretLen: `openssl rand -hex 32` da 64 caracteres. Un texto de ejemplo («tu_clave_secreta…») es corto y
+// adivinable, así que se rechaza en lugar de aceptarlo como si fuera un secreto.
+const MinSecretLen = 32
+
 // New devuelve nil si el secreto está vacío o es demasiado corto: sin secreto no hay enlaces.
 func New(secret string) *Signer {
-	if len(secret) < 16 {
+	if len(secret) < MinSecretLen {
 		return nil
 	}
 	return &Signer{secret: []byte(secret)}

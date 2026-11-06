@@ -25,13 +25,13 @@ func TestFirmaYCaducidad(t *testing.T) {
 			t.Errorf("%q no debe valer", bad)
 		}
 	}
-	if New("otro-secreto-distinto-1234").Valid("pdf:c1:r1", tok, now) {
+	if New("otro-secreto-distinto-0123456789abcdef").Valid("pdf:c1:r1", tok, now) {
 		t.Error("otro secreto no debe validar")
 	}
 }
 
 func TestSinSecretoNoHayEnlaces(t *testing.T) {
-	if New("") != nil || New("corto") != nil {
+	if New("") != nil || New("corto") != nil || New("tu_clave_secreta_generada_aqui") != nil {
 		t.Error("secreto vacío o corto debe devolver nil")
 	}
 	var s *Signer

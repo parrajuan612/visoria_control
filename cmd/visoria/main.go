@@ -148,7 +148,8 @@ func run() int {
 	}
 	links := signedurl.New(cfg.LinkSecret)
 	if links == nil {
-		slog.Warn("LINK_SECRET no definido (mínimo 16 caracteres): las notas de Chatwoot no llevarán enlace al PDF y el ZIP solo se descargará desde localhost")
+		slog.Warn("LINK_SECRET ausente o demasiado corto (mínimo 32 caracteres; genere uno con `openssl rand -hex 32`, no use el texto de ejemplo): "+
+			"las notas de Chatwoot no llevarán enlace al PDF y el ZIP solo se descargará desde localhost", "definido", cfg.LinkSecret != "")
 	}
 	pdfLink := func(campaignID, recipientID string) string {
 		if links == nil || cfg.BaseURL == "" {

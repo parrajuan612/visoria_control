@@ -330,7 +330,7 @@ func (h *CampaignHandler) ZipLink(c *gin.Context) {
 		return
 	}
 	if h.links == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Los enlaces de descarga no están configurados: defina LINK_SECRET (mínimo 16 caracteres) en el servidor."})
+		c.JSON(http.StatusConflict, gin.H{"error": "Los enlaces de descarga no están configurados: defina LINK_SECRET (mínimo 32 caracteres, p. ej. `openssl rand -hex 32`) en el servidor y reinicie."})
 		return
 	}
 	if _, err := h.uc.Get(c.Request.Context(), id); err != nil {
